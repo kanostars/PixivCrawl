@@ -567,8 +567,8 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = "first_visit_datetime_pc=2024-10-28%2015%3A47%3A50; yuid_b=MDhIaSQ; p_ab_id=0; p_ab_id_2=5; p_ab_d_id=1010825385; _gid=GA1.2.304787948.1730098076; cf_clearance=ItF6dTW2176VOIpbIzYu7nsHOq3SvOKTrhUwMLVxIkw-1730098596-1.2.1.1-NT_Me9C2T7ME8DKrqu27..qbQVeH07eHpdrfJV.Rgl0wTK9QWA2x2vf.sfSa8VTTzj1yaeQeEFt1LwNNg1_EtMhQndt7p_Lfc6yeuLOROXhLref_.iHu.xKJ19NQe7ziH0sJXQyHDhnGKNdkV6TooYGK8MtVIfIpz1DKovd6jQBtGDS1PAC4G.hNugmNSF0vB6zcMvuUvQ2RztdZIAYHGTK2X1Eu2PVUoS6AP_ee01M..q2NH49wfDO.m6pJZgvHwvvdbLa5AxGwRuXvRt5_QZT2zWy5R5sF7.B59W8.JBekKbBHVZxazp11erzDwmmeuvKr_xtDFVscXQRNfxjs38T9FFumAchzGA_catoR8xRErCL4YEi5pmo3aFSnmXYq8p2SOY2WowQwGv7ePWtd4A; PHPSESSID=55796473_fl4Q8QxUzGAGEZPTJTTZBGlHp9S52OVF; device_token=f8e45aad75360f69b925b28a89135872; privacy_policy_agreement=7; _ga_MZ1NL4PHH0=GS1.1.1730098551.1.1.1730098603.0.0.0; c_type=31; privacy_policy_notification=0; a_type=0; b_type=1; login_ever=yes; __utma=235335808.1043447830.1730098071.1730099203.1730099203.1; __utmz=235335808.1730099203.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); __utmv=235335808.|2=login%20ever=yes=1^3=plan=normal=1^6=user_id=55796473=1^9=p_ab_id=0=1^10=p_ab_id_2=5=1^11=lang=zh=1; _ga=GA1.1.1043447830.1730098071; _ga_75BBYNYN9J=GS1.1.1730275555.10.1.1730275561.0.0.0"
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0"
+    cookie = ""  # 登录后自行去获取cookie
+    user_agent = ""  # 自行去获取user-agent
     root = Tk()
     app = PixivApp(root)
 
