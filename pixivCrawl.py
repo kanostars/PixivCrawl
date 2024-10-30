@@ -567,8 +567,8 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = ""  # 登录后自行去获取cookie
-    user_agent = ""  # 自行去获取user-agent
+    cookie = " "  # 登录后自行去获取cookie
+    user_agent = " "  # 自行去获取user-agent
     root = Tk()
     app = PixivApp(root)
 
