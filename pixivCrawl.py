@@ -46,6 +46,7 @@ class PixivDownloader:
         self.app = pixiv_app
         self.type = ""
         self.artist = ""
+        self.mkdirs = ""
         self.cookie = cookie_id if cookie_id != "" else cookie
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
 
@@ -62,25 +63,26 @@ class PixivDownloader:
         return None
 
     # 准备下载图片
-    def download_images(self, img_ids, mkdirs=None, type=None):
-        logging.info(f"大概下载图片数: {len(img_ids)}+")
+    def download_images(self, img_ids, type):
         self.type = type
         self.artist = self.get_worker_name(img_ids[0])
         logging.info(f"画师名字: {self.artist}")
-        if self.type == "artist":
-            mkdirs = create_directory("workers_IMG", self.artist)
-
+        if self.type == "artist":  # 类型是通过画师id
+            logging.info(f"大概下载图片数: {len(img_ids)}+")
+            self.mkdirs = create_directory("workers_IMG", self.artist)
+        elif self.type == "artWorker":  # 类型是通过插画id
+            self.mkdirs = create_directory("artworks_IMG", img_ids[0])
         self.app.update_progress_bar(0, len(img_ids))  # 初始化进度条
-        with ThreadPoolExecutor(max_workers=max(os.cpu_count(), 64)) as executor:
-            futures = [executor.submit(self.download_image_or_gif, img_id, mkdirs) for img_id in img_ids]
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(self.download_image_or_gif, img_id) for img_id in img_ids]
             for future in as_completed(futures):
                 future.result()
                 self.app.update_progress_bar(1)  # 更新进度条
 
-        logging.info(f"下载完成，共有{len(os.listdir(mkdirs))}张图片~")
+        logging.info(f"下载完成，共有{len(os.listdir(self.mkdirs))}张图片~")
 
     # 判断是动图还是静态图
-    def download_image_or_gif(self, img_id, mkdirs):
+    def download_image_or_gif(self, img_id):
         time.sleep(random.uniform(1, 5))  # 随机等待1-5秒
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
         session = requests.Session()
@@ -88,58 +90,68 @@ class PixivDownloader:
         data = response.json()
 
         if data['error']:
-            self.download_static_images(session, img_id, mkdirs)
+            self.download_static_images(session, img_id)
         else:
-            self.download_gifs(data, mkdirs, img_id)
+            self.download_gifs(data, img_id)
 
     # 准备下载静态图片
-    def download_static_images(self, session, img_id, mkdir_static):
+    def download_static_images(self, session, img_id):
         response = session.get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", verify=False,
                                headers=self.headers)
         request_if_error(response)
         static_url = json.loads(response.text)['body']
-
-        with ThreadPoolExecutor(max_workers=max(os.cpu_count(), 64)) as executor:
-            futures = [executor.submit(self.download_static_image, ID['urls']['original'], mkdir_static) for ID
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(self.download_static_image, ID['urls']['original']) for ID
                        in static_url]
             for future in as_completed(futures):
                 future.result()
 
     # 下载静态图片
-    def download_static_image(self, url, mkdirs):
-        file_path = os.path.join(mkdirs, f"@{self.artist} {os.path.basename(url)}")
-        session = requests.Session()
-        download_response = session.get(url=url, headers=self.headers, verify=False, stream=True)
-        with open(file_path, "wb") as f:
-            for data in download_response.iter_content(chunk_size=1024):
-                f.write(data)
+    def download_static_image(self, url):
+        name = os.path.basename(url)
+        file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
+        try:
+            download_response = requests.get(url=url, headers=self.headers, verify=False, stream=True, timeout=3)
+            with open(file_path, "wb") as f:
+                f.write(download_response.content)
+        except requests.exceptions.ReadTimeout:
+            logging.warning(f"图片：{name}下载超时，正在重试...")
+            self.download_static_image(url)
+            return
 
     # 准备下载动态图片
-    def download_gifs(self, data, mkdirs, img_id):
-        delays = [frame['delay'] for frame in data['body']['frames']]
-        with ThreadPoolExecutor(max_workers=max(os.cpu_count(), 64)) as executor:
-            futures = [executor.submit(self.download_gif, data['body']['originalSrc'], mkdirs, img_id, delays)]
+    def download_gifs(self, data, img_id):
+        delays = [frame['delay'] for frame in data['body']['frames']]  # 获取帧信息
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(self.download_gif, data['body']['originalSrc'], img_id, delays)]
             for future in as_completed(futures):
                 future.result()
 
     # 下载动态图片
-    def download_gif(self, url, mkdirs, img_id, delays):
-        file_path = os.path.join(mkdirs, f"@{self.artist} {img_id}.gif")
-        response = requests.get(url, headers=self.headers, verify=False)
-        zip_content = io.BytesIO(response.content)
+    def download_gif(self, url, img_id, delays):
+        name = f"@{self.artist} {img_id}.gif"
+        file_path = os.path.join(self.mkdirs, name)
+        try:
+            response = requests.get(url, headers=self.headers, verify=False, timeout=3)
 
-        with zipfile.ZipFile(zip_content, 'r') as zip_ref:
-            image_files = [f for f in zip_ref.namelist() if f.endswith(('.png', '.jpg', '.jpeg'))]
-            images = [Image.open(zip_ref.open(image_file)).convert('RGBA') for image_file in image_files]
+            zip_content = io.BytesIO(response.content)
 
-        if images:
-            images[0].save(
-                file_path,
-                save_all=True,
-                append_images=images[1:],
-                duration=delays,
-                loop=0
-            )
+            with zipfile.ZipFile(zip_content, 'r') as zip_ref:
+                image_files = [f for f in zip_ref.namelist() if f.endswith(('.png', '.jpg', '.jpeg'))]
+                images = [Image.open(zip_ref.open(image_file)).convert('RGBA') for image_file in image_files]
+
+            if images:
+                images[0].save(
+                    file_path,
+                    save_all=True,
+                    append_images=images[1:],
+                    duration=delays,
+                    loop=0
+                )
+        except requests.exceptions.ReadTimeout:
+            logging.warning(f"图片：{name}下载超时，正在重试...")
+            self.download_gif(url, img_id, delays)
+            return
 
 
 # 通过插画id下载图片
@@ -148,11 +160,10 @@ class ThroughArtWorkerId(PixivDownloader):
         super().__init__(cookie_id, pixiv_app)
         self.img_id = img_id
         self.type = "artWorker"
-        self.mkdirs_artworks = create_directory("artworks_IMG", self.img_id)
 
     def pre_download(self):
         logging.info(f"正在通过插画ID({self.img_id})下载图片...")
-        self.download_images([self.img_id], self.mkdirs_artworks, self.type)
+        self.download_images([self.img_id], self.type)
 
 
 # 通过画师id下载图片
@@ -170,7 +181,7 @@ class ThroughWorkerId(PixivDownloader):
     def pre_download(self):
         logging.info(f"正在通过画师ID({self.artist_id})下载图片...")
         img_ids = self.get_img_ids()
-        self.download_images(img_ids=img_ids, type=self.type)
+        self.download_images(img_ids, self.type)
 
 
 class TkinterLogHandler(logging.Handler):
@@ -186,6 +197,7 @@ class TkinterLogHandler(logging.Handler):
         self.text_widget.configure(state='disabled')
 
 
+# 应用界面框
 class PixivApp:
     def __init__(self, root_app):
         self.root = root_app
