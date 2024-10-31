@@ -1,4 +1,5 @@
 import re
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from tkinter.ttk import Progressbar, Style
 import requests
@@ -21,8 +22,8 @@ TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
 
 
-def thread_it(func):
-    thread = threading.Thread(target=func)
+def thread_it(func, *args):
+    thread = threading.Thread(target=func, args=args)
     thread.daemon = True
     thread.start()
 
@@ -66,9 +67,21 @@ def create_directory(*base_dir):
     return mkdir
 
 
+# 创建或更新文件，清空文件内容
 def touch(file_path):
     with open(file_path, 'wb') as f:
         f.truncate(0)
+
+
+def resource_path(relative_path):
+    """ 获取资源文件的绝对路径 """
+    try:
+        # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 
 # p站图片下载器
@@ -134,7 +147,7 @@ class PixivDownloader:
 
            参数:
            img_ids (list): 图片ID列表。
-           t (str): 下载类型的标识符，可以是'artist'（画师）或'artWork'（插画）。
+           t (str): 下载类型，可以是'artist'（画师）或'artWork'（插画）。
 
            返回:
            无
@@ -144,10 +157,10 @@ class PixivDownloader:
         logging.info(f"画师名字: {self.artist}")
         if self.type == TYPE_WORKER:  # 类型是通过画师id
             logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-            self.app.update_progress_bar(0, len(img_ids))
             self.mkdirs = create_directory("workers_IMG", self.artist)
         elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
             self.mkdirs = create_directory("artworks_IMG", img_ids[0])
+        self.app.update_progress_bar(0, len(img_ids))
         self.download_by_art_worker_ids(img_ids)
 
         self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
@@ -407,7 +420,8 @@ class PixivApp:
         self.root = root_app
         self.root.geometry('700x700+400+5')
         self.root.title('pixiv爬虫')
-        self.root.img = PhotoImage(file='img//92260993.png')
+        img_path = resource_path('img//92260993.png')
+        self.root.img = PhotoImage(file=img_path)
         self.log_text = ''
         self.total_progress = 0
         self.current_progress = 0
@@ -455,7 +469,7 @@ class PixivApp:
         radiobutton2.pack(side=LEFT, padx=20)
         self.b_users.set(False)
         self.button_artist = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
-                                    bg='lavender', height=2, command=lambda: thread_it(self.WorkerId))
+                                    bg='lavender', height=2, command=lambda: thread_it(self.submit_id, TYPE_WORKER))
         self.button_artist.pack(fill='both', pady=(0, 10), anchor="n")
         label_input1 = Label(input_frame1, text='请输入画师uid:', font=('黑体', 20))
         label_input1.pack(side=LEFT)
@@ -477,7 +491,7 @@ class PixivApp:
         radiobutton4.pack(side=LEFT, padx=20)
         self.b_artworks.set(False)
         self.button_artwork = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
-                                     bg='lavender', height=2, command=lambda: thread_it(self.ArtWorkerId))
+                                     bg='lavender', height=2, command=lambda: thread_it(self.submit_id, TYPE_ARTWORKS))
         self.button_artwork.pack(fill='both', pady=(0, 0), anchor="n")
         label_input2 = Label(input_frame2, text='请输入图片uid:', font=('黑体', 20))
         label_input2.pack(side=LEFT)
@@ -504,6 +518,36 @@ class PixivApp:
     # 是否查看插画原网站
     def isArtworks(self):
         return self.b_artworks.get()
+
+    def submit_id(self, t):
+        try:
+            # 防止用户在处理期间进行交互
+            self.button_artist.config(state=DISABLED)
+            self.button_artwork.config(state=DISABLED)
+            cookieID = self.inputCookie_var.get()
+            if t == TYPE_WORKER:  # 画师
+                workerId = self.input_var.get()
+                if workerId == '':
+                    logging.warning('输入的画师id不能为空~~')
+                    return
+                if self.isWorkers():
+                    webbrowser.open(f"https://www.pixiv.net/users/{workerId}")
+                ThroughId(cookieID, workerId, app, TYPE_WORKER).pre_download()
+            elif t == TYPE_ARTWORKS:  # 插画
+                ImgId = self.id_input_var.get()
+                if ImgId == '':
+                    logging.warning('输入的插画id不能为空~~')
+                    return
+                if self.isArtworks():
+                    webbrowser.open(f"https://www.pixiv.net/artworks/{ImgId}")
+                ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS).pre_download()
+        except requests.exceptions.ConnectTimeout:
+            logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
+        except requests.exceptions.RequestException as e:
+            logging.warning(f"网络请求失败: {e}")
+        finally:
+            self.button_artist.config(state=NORMAL)
+            self.button_artwork.config(state=NORMAL)
 
     # 提交画师id
     def WorkerId(self):
@@ -567,8 +611,8 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = " "  # 登录后自行去获取cookie
-    user_agent = " "  # 自行去获取user-agent
+    cookie = "first_visit_datetime_pc=2024-10-28%2015%3A47%3A50; yuid_b=MDhIaSQ; p_ab_id=0; p_ab_id_2=5; p_ab_d_id=1010825385; _gid=GA1.2.304787948.1730098076; cf_clearance=ItF6dTW2176VOIpbIzYu7nsHOq3SvOKTrhUwMLVxIkw-1730098596-1.2.1.1-NT_Me9C2T7ME8DKrqu27..qbQVeH07eHpdrfJV.Rgl0wTK9QWA2x2vf.sfSa8VTTzj1yaeQeEFt1LwNNg1_EtMhQndt7p_Lfc6yeuLOROXhLref_.iHu.xKJ19NQe7ziH0sJXQyHDhnGKNdkV6TooYGK8MtVIfIpz1DKovd6jQBtGDS1PAC4G.hNugmNSF0vB6zcMvuUvQ2RztdZIAYHGTK2X1Eu2PVUoS6AP_ee01M..q2NH49wfDO.m6pJZgvHwvvdbLa5AxGwRuXvRt5_QZT2zWy5R5sF7.B59W8.JBekKbBHVZxazp11erzDwmmeuvKr_xtDFVscXQRNfxjs38T9FFumAchzGA_catoR8xRErCL4YEi5pmo3aFSnmXYq8p2SOY2WowQwGv7ePWtd4A; PHPSESSID=55796473_fl4Q8QxUzGAGEZPTJTTZBGlHp9S52OVF; device_token=f8e45aad75360f69b925b28a89135872; privacy_policy_agreement=7; _ga_MZ1NL4PHH0=GS1.1.1730098551.1.1.1730098603.0.0.0; c_type=31; privacy_policy_notification=0; a_type=0; b_type=1; login_ever=yes; __utma=235335808.1043447830.1730098071.1730099203.1730099203.1; __utmz=235335808.1730099203.1.1.utmcsr=(direct)|utmccn=(direct)|utmcmd=(none); __utmv=235335808.|2=login%20ever=yes=1^3=plan=normal=1^6=user_id=55796473=1^9=p_ab_id=0=1^10=p_ab_id_2=5=1^11=lang=zh=1; _ga=GA1.2.1043447830.1730098071; _ga_75BBYNYN9J=GS1.1.1730294822.13.1.1730298673.0.0.0"
+    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"  # 自行去获取user-agent
     root = Tk()
     app = PixivApp(root)
 
