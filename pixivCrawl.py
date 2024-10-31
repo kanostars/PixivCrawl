@@ -84,6 +84,29 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
+def log_init():
+    # 创建日志记录器
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+
+    # 创建文件处理器，将日志写入文件
+    mkdirLog = create_directory("log")
+    file_handler = TimedRotatingFileHandler(os.path.join(mkdirLog, 'my.log'),
+                                            when='midnight', interval=1, backupCount=7, encoding='utf-8')
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.setLevel(logging.DEBUG)
+
+    # 创建Tkinter日志处理器
+    tkinter_handler = TkinterLogHandler(app.log_text)
+    tkinter_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    tkinter_handler.setLevel(logging.INFO)
+
+    # 添加处理器到日志记录器
+    logger.addHandler(file_handler)
+    logger.addHandler(tkinter_handler)
+
+
 # p站图片下载器
 class PixivDownloader:
     def __init__(self, cookie_id, pixiv_app):
@@ -429,8 +452,8 @@ class PixivApp:
         self.button_artwork = None
         self.process_text = None
         self.progress_bar = {}
-        self.input_var = StringVar()  # 接受画师uid
-        self.id_input_var = StringVar()  # 接受作品uid
+        self.input_var_worker = StringVar()  # 接受画师uid
+        self.input_var_artwork = StringVar()  # 接受作品uid
         self.inputCookie_var = StringVar()  # 接受登陆后的cookie
         self.b_users = BooleanVar()  # 是否查看画师主页
         self.b_artworks = BooleanVar()  # 是否查看作品网页
@@ -473,7 +496,7 @@ class PixivApp:
         self.button_artist.pack(fill='both', pady=(0, 10), anchor="n")
         label_input1 = Label(input_frame1, text='请输入画师uid:', font=('黑体', 20))
         label_input1.pack(side=LEFT)
-        entry1 = Entry(input_frame1, width=95, relief='flat', textvariable=self.input_var)
+        entry1 = Entry(input_frame1, width=95, relief='flat', textvariable=self.input_var_worker)
         entry1.pack(side=LEFT, fill='both')
 
         # 键入作品uid
@@ -495,7 +518,7 @@ class PixivApp:
         self.button_artwork.pack(fill='both', pady=(0, 0), anchor="n")
         label_input2 = Label(input_frame2, text='请输入图片uid:', font=('黑体', 20))
         label_input2.pack(side=LEFT)
-        entry2 = Entry(input_frame2, width=95, relief='flat', textvariable=self.id_input_var)
+        entry2 = Entry(input_frame2, width=95, relief='flat', textvariable=self.input_var_artwork)
         entry2.pack(side=LEFT, fill='both')
 
         # 进度条显示区域
@@ -519,6 +542,7 @@ class PixivApp:
     def isArtworks(self):
         return self.b_artworks.get()
 
+    # 提交id
     def submit_id(self, t):
         try:
             # 防止用户在处理期间进行交互
@@ -526,7 +550,7 @@ class PixivApp:
             self.button_artwork.config(state=DISABLED)
             cookieID = self.inputCookie_var.get()
             if t == TYPE_WORKER:  # 画师
-                workerId = self.input_var.get()
+                workerId = self.input_var_worker.get()
                 if workerId == '':
                     logging.warning('输入的画师id不能为空~~')
                     return
@@ -534,7 +558,7 @@ class PixivApp:
                     webbrowser.open(f"https://www.pixiv.net/users/{workerId}")
                 ThroughId(cookieID, workerId, app, TYPE_WORKER).pre_download()
             elif t == TYPE_ARTWORKS:  # 插画
-                ImgId = self.id_input_var.get()
+                ImgId = self.input_var_artwork.get()
                 if ImgId == '':
                     logging.warning('输入的插画id不能为空~~')
                     return
@@ -544,51 +568,6 @@ class PixivApp:
         except requests.exceptions.ConnectTimeout:
             logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
         except requests.exceptions.RequestException as e:
-            logging.warning(f"网络请求失败: {e}")
-        finally:
-            self.button_artist.config(state=NORMAL)
-            self.button_artwork.config(state=NORMAL)
-
-    # 提交画师id
-    def WorkerId(self):
-        try:
-            # 防止用户在处理期间进行交互
-            self.button_artist.config(state=DISABLED)
-            self.button_artwork.config(state=DISABLED)
-            cookieID = self.inputCookie_var.get()
-            workerId = self.input_var.get()
-            if workerId == '':
-                logging.warning('输入的画师id不能为空~~')
-                return
-            if self.isWorkers():
-                webbrowser.open(f"https://www.pixiv.net/users/{workerId}")
-            ThroughId(cookieID, workerId, app, TYPE_WORKER).pre_download()
-        except requests.exceptions.ConnectTimeout:
-            logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"网络请求失败: {e}")
-        finally:
-            self.button_artist.config(state=NORMAL)
-            self.button_artwork.config(state=NORMAL)
-
-    # 提交插画id
-    def ArtWorkerId(self):
-        try:
-            # 防止用户在处理期间进行交互
-            self.button_artist.config(state=DISABLED)
-            self.button_artwork.config(state=DISABLED)
-            cookieID = self.inputCookie_var.get()
-            ImgId = self.id_input_var.get()
-            if ImgId == '':
-                logging.warning('输入的插画id不能为空~~')
-                return
-            if self.isArtworks():
-                webbrowser.open(f"https://www.pixiv.net/artworks/{ImgId}")
-            ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS).pre_download()
-        except requests.exceptions.ConnectTimeout:
-            logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
-        except requests.exceptions.RequestException as e:
-            print(e)
             logging.warning(f"网络请求失败: {e}")
         finally:
             self.button_artist.config(state=NORMAL)
@@ -615,26 +594,29 @@ if __name__ == '__main__':
     user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"  # 自行去获取user-agent
     root = Tk()
     app = PixivApp(root)
-
-    # 创建日志记录器
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
-
-    # 创建文件处理器，将日志写入文件
-    mkdirLog = create_directory("log")
-    file_handler = TimedRotatingFileHandler(os.path.join(mkdirLog, 'my.log'),
-                                            when='midnight', interval=1, backupCount=7, encoding='utf-8')
-    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    file_handler.setLevel(logging.DEBUG)
-
-    # 创建Tkinter日志处理器
-    tkinter_handler = TkinterLogHandler(app.log_text)
-    tkinter_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-    tkinter_handler.setLevel(logging.INFO)
-
-    # 添加处理器到日志记录器
-    logger.addHandler(file_handler)
-    logger.addHandler(tkinter_handler)
-
+    log_init()  # 日志初始化
+    #
+    # worker_id = None
+    # artwork_id = None
+    # is_start_now = False
+    # for arg in sys.argv:
+    #     if arg == "-worker-id":
+    #         worker_id = sys.argv[sys.argv.index(arg) + 1]
+    #     elif arg == "-artwork-id":
+    #         artwork_id = sys.argv[sys.argv.index(arg) + 1]
+    #     elif arg == "-cookie":
+    #         cookie = sys.argv[sys.argv.index(arg) + 1]
+    #     elif arg == "--start-now":
+    #         is_start_now = True
+    # if worker_id is not None:
+    #     app.input_var_worker.set(worker_id)
+    # if artwork_id is not None:
+    #     app.input_var_artwork.set(artwork_id)
+    # if is_start_now:
+    #     app.WorkerId()
+    #
+    # print(worker_id)
+    # print(artwork_id)
+    # print(cookie)
+    # print(is_start_now)
     root.mainloop()
