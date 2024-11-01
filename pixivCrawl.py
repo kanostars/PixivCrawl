@@ -1,7 +1,7 @@
 import re
 import sys
 from logging.handlers import TimedRotatingFileHandler
-from tkinter.ttk import Progressbar, Style
+from tkinter.ttk import Progressbar
 import requests
 import urllib3
 import json
@@ -15,6 +15,7 @@ import logging
 import zipfile
 from PIL import Image
 from requests.adapters import HTTPAdapter
+import winreg
 
 urllib3.disable_warnings()
 
@@ -73,17 +74,17 @@ def touch(file_path):
         f.truncate(0)
 
 
+# 获取资源文件的绝对路径
 def resource_path(relative_path):
-    """ 获取资源文件的绝对路径 """
     try:
         # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
 
 
+# 初始化日志
 def log_init():
     # 创建日志记录器
     logger = logging.getLogger()
@@ -107,6 +108,60 @@ def log_init():
     logger.addHandler(tkinter_handler)
 
 
+# 创建注册表键
+def check_registry_key_exists(key_path):
+    try:
+        # 尝试打开注册表键
+        root_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
+        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
+        winreg.DeleteKey(key, "")
+        winreg.CloseKey(key)
+        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
+    except FileNotFoundError:
+        # 创建注册表键
+        print("注册表键不存在，创建中...")
+        root_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
+        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
+        winreg.SetValueEx(root_key, "URL Protocol", 0, winreg.REG_SZ, "")
+    # path = os.path.join(os.getcwd(), os.path.basename(sys.argv[0]))
+    path = f'"{os.path.abspath(sys.argv[0])}" "%1"'
+    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, path)
+    winreg.CloseKey(root_key)
+    winreg.CloseKey(key)
+
+
+# 读取json文件
+def open_json():
+    json_file = resource_path("pixivCrawl.json")
+    default_data = {
+        "PHPSESSID": "",
+        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+    }
+    try:
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data
+    except FileNotFoundError:
+        print("未找到配置文件，正在创建默认配置文件。")
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(default_data, f, ensure_ascii=False, indent=4)
+        return default_data
+
+
+# 更新json文件
+def update_json(data_id):
+    json_file = resource_path("pixivCrawl.json")
+    with open(json_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    data["PHPSESSID"] = data_id
+
+    with open(json_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+
+    logging.info(f"成功更新配置文件，下次失效时再进行填写。")
+
+
 # p站图片下载器
 class PixivDownloader:
     def __init__(self, cookie_id, pixiv_app):
@@ -122,6 +177,11 @@ class PixivDownloader:
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
         self.cookie = cookie_id if cookie_id != "" else cookie
+
+        # 更新cookie
+        if self.cookie != cookie and self.cookie != "":
+            update_json(self.cookie)
+
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
@@ -175,36 +235,48 @@ class PixivDownloader:
            返回:
            无
         """
-        self.type = t
-        self.artist = self.get_worker_name(img_ids[0])
-        logging.info(f"画师名字: {self.artist}")
-        if self.type == TYPE_WORKER:  # 类型是通过画师id
-            logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-            self.mkdirs = create_directory("workers_IMG", self.artist)
-        elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
-            self.mkdirs = create_directory("artworks_IMG", img_ids[0])
-        self.app.update_progress_bar(0, len(img_ids))
-        self.download_by_art_worker_ids(img_ids)
+        try:
+            self.type = t
+            self.artist = self.get_worker_name(img_ids[0])
+            if self.artist is None:
+                return
+            logging.info(f"画师名字: {self.artist}")
+            if self.type == TYPE_WORKER:  # 类型是通过画师id
+                logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
+                self.mkdirs = create_directory("workers_IMG", self.artist)
+            elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
+                self.mkdirs = create_directory("artworks_IMG", img_ids[0])
+            self.app.update_progress_bar(0, len(img_ids))
+            self.download_by_art_worker_ids(img_ids)
 
-        self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
-        logging.info(f"检索结束...")
-        logging.info(f"正在开始下载... 共{self.numbers}张图片...")
-        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
-            futures = []
-            for (url, save_path, start_size, end_size) in self.download_queue:
-                f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
-                futures.append(f)
-        for future in as_completed(futures):
-            future.result()
+            self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
+            logging.info(f"检索结束...")
+            if self.numbers == 0:
+                logging.warning("PHPSESSID已失效，请重新填写!")
+                return
+            logging.info(f"正在开始下载... 共{self.numbers}张图片...")
+            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
+                futures = []
+                for (url, save_path, start_size, end_size) in self.download_queue:
+                    f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
+                    futures.append(f)
+            for future in as_completed(futures):
+                future.result()
 
-        if len(self.need_com_gif) > 0:
-            logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
-            self.app.update_progress_bar(0, len(self.need_com_gif))
-            for img_id in self.need_com_gif:
-                self.comp_gif(img_id)
-                self.app.update_progress_bar(1)
+            if len(self.need_com_gif) > 0:
+                logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
+                self.app.update_progress_bar(0, len(self.need_com_gif))
+                for img_id in self.need_com_gif:
+                    self.comp_gif(img_id)
+                    self.app.update_progress_bar(1)
 
-        logging.info(f"下载完成，共有{len(os.listdir(self.mkdirs))}张图片~")
+            logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
+            if if_exit_finish:
+                logging.info("程序已自动退出")
+                root.destroy()
+
+        except IndexError:
+            logging.warning("未找到该画师,请重新输入~")
 
     def get_worker_name(self, img_id):
         """
@@ -412,10 +484,10 @@ class ThroughId(PixivDownloader):
 
     def pre_download(self):
         if self.type == TYPE_ARTWORKS:
-            logging.info(f"正在通过插画ID({self.id})下载图片...")
+            logging.info(f"正在通过插画ID({self.id})检索图片...")
             self.download_images([self.id], self.type)
         elif self.type == TYPE_WORKER:
-            logging.info(f"正在通过画师ID({self.id})下载图片...")
+            logging.info(f"正在通过画师ID({self.id})检索图片...")
             img_ids = self.get_img_ids()
             self.download_images(img_ids, self.type)
 
@@ -442,8 +514,8 @@ class PixivApp:
     def __init__(self, root_app):
         self.root = root_app
         self.root.geometry('700x700+400+5')
-        self.root.title('pixiv爬虫')
-        img_path = resource_path('img//92260993.png')
+        self.root.title('pixiv下载器')
+        img_path = resource_path('img\\92260993.png')
         self.root.img = PhotoImage(file=img_path)
         self.log_text = ''
         self.total_progress = 0
@@ -458,9 +530,6 @@ class PixivApp:
         self.b_users = BooleanVar()  # 是否查看画师主页
         self.b_artworks = BooleanVar()  # 是否查看作品网页
 
-        self.style = Style()
-        self.style.configure("Custom.Horizontal.TProgressbar", background="blue")
-
         # 创建控件
         self.create_widgets()
 
@@ -472,8 +541,8 @@ class PixivApp:
         # 键入cookie
         message_cookie = LabelFrame(self.root)
         message_cookie.pack(fill='both', pady=(0, 10), anchor="n")
-        cookie_label = Label(message_cookie, text='请输入cookie(默认给的cookie没用在填!):', font=('黑体', 15))
-        cookie_label.pack(side=LEFT, pady=20)
+        cookie_label = Label(message_cookie, text='请输入PHPSESSID(可选):', font=('黑体', 15))
+        cookie_label.pack(side=LEFT, pady=5)
         entry_cookie = Entry(message_cookie, width=95, relief='flat', textvariable=self.inputCookie_var)
         entry_cookie.pack(side=LEFT, fill='both')
 
@@ -522,17 +591,22 @@ class PixivApp:
         entry2.pack(side=LEFT, fill='both')
 
         # 进度条显示区域
-        process_label = Label(self.root)
-        process_label.pack(fill='both')
-        self.progress_bar = Progressbar(process_label, orient='horizontal', mode='determinate',
+        process_frame = Frame(self.root)
+        process_frame.pack(fill='both')
+        self.progress_bar = Progressbar(process_frame, orient='horizontal', mode='determinate',
                                         length=650, style="Custom.Horizontal.TProgressbar")
         self.progress_bar.pack(side=LEFT)
-        self.process_text = Label(process_label, text='0%')
+        self.process_text = Label(process_frame, text='0%')
         self.process_text.pack(side=RIGHT)
 
         # 日志显示区域
-        self.log_text = Text(self.root, height=10, state='disabled')
+        self.log_text = Text(self.root, height=10)
         self.log_text.pack(fill='both', expand=True)
+        self.log_text.insert('1.0',  # 插入默认日志信息
+                             '|欢迎使用 PIXIV 图片下载器 ！                                                   |\n'  
+                             '|填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。|\n'
+                             '|-------------------------------------------------------------------------------|\n')
+        self.log_text.config(state='disabled')  # 禁用编辑功能
 
     # 是否查看画师主页
     def isWorkers(self):
@@ -590,33 +664,50 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = ""  # 自行登录去获取cookie
-    user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"  # 自行去获取user-agent
+    cookie = f'PHPSESSID={open_json()["PHPSESSID"]}'
+    user_agent = open_json()["user_agent"]
+
     root = Tk()
     app = PixivApp(root)
+
     log_init()  # 日志初始化
-    #
-    # worker_id = None
-    # artwork_id = None
-    # is_start_now = False
-    # for arg in sys.argv:
-    #     if arg == "-worker-id":
-    #         worker_id = sys.argv[sys.argv.index(arg) + 1]
-    #     elif arg == "-artwork-id":
-    #         artwork_id = sys.argv[sys.argv.index(arg) + 1]
-    #     elif arg == "-cookie":
-    #         cookie = sys.argv[sys.argv.index(arg) + 1]
-    #     elif arg == "--start-now":
-    #         is_start_now = True
-    # if worker_id is not None:
-    #     app.input_var_worker.set(worker_id)
-    # if artwork_id is not None:
-    #     app.input_var_artwork.set(artwork_id)
-    # if is_start_now:
-    #     app.WorkerId()
-    #
-    # print(worker_id)
-    # print(artwork_id)
-    # print(cookie)
-    # print(is_start_now)
+    check_registry_key_exists(r"pixivdownload")
+
+    worker_id = None
+    artwork_id = None
+    is_start_now = False
+    if_exit_finish = False
+
+    # 获取命令行参数
+    if len(sys.argv) > 1:
+        url_get = sys.argv[1]
+        if '/' in url_get:
+            sys.argv = url_get.split('/')
+
+    # 命令行参数解析
+    for arg in sys.argv:
+        if arg == "-worker-id":
+            worker_id = sys.argv[sys.argv.index(arg) + 1]
+        elif arg == "-artwork-id":
+            artwork_id = sys.argv[sys.argv.index(arg) + 1]
+        elif arg == "-cookie":
+            cookie = sys.argv[sys.argv.index(arg) + 1]
+        elif arg == "--start-now":
+            is_start_now = True
+        elif arg == "--exit-finish":
+            if_exit_finish = True
+
+    if worker_id and artwork_id and is_start_now:
+        logging.warning("一个一个来~")
+        exit(1)
+
+    if worker_id:
+        app.input_var_worker.set(worker_id)
+        if is_start_now:
+            app.button_artist.invoke()
+    if artwork_id:
+        app.input_var_artwork.set(artwork_id)
+        if is_start_now:
+            app.button_artwork.invoke()
+
     root.mainloop()
