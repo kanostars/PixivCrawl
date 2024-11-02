@@ -1,7 +1,6 @@
 import re
 import sys
 import time
-from asyncio import timeout
 from logging.handlers import TimedRotatingFileHandler
 from tkinter.ttk import Progressbar
 import requests
