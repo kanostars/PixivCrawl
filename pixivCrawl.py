@@ -1,5 +1,7 @@
 import re
 import sys
+import time
+from asyncio import timeout
 from logging.handlers import TimedRotatingFileHandler
 from tkinter.ttk import Progressbar
 import requests
@@ -54,16 +56,15 @@ def create_directory(*base_dir):
     """
        根据给定的目录参数创建目录。
 
-       该函数接受一个或多个目录参数，将它们与当前工作目录结合，并创建对应的目录。
-       如果目录已经存在，不会重新创建，以防止重复创建导致的错误。
-
        参数:
        *base_dir: 可变数量的参数，代表需要创建的目录层级。每个参数代表目录层级中的一个部分。
 
        返回值:
        返回创建的目录路径，或者已经存在的目录路径。
        """
-    mkdir = os.path.join(os.getcwd(), *base_dir)
+    script_path = os.path.abspath(sys.argv[0])
+    parent_dir = os.path.dirname(os.path.dirname(script_path))
+    mkdir = os.path.join(parent_dir, *base_dir)
     os.makedirs(mkdir, exist_ok=True)
     return mkdir
 
@@ -78,8 +79,8 @@ def touch(file_path):
 def resource_path(relative_path):
     try:
         # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
-        base_path = sys._MEIPASS
-    except Exception:
+        base_path = getattr(sys, '_MEIPASS', None)
+    except AttributeError:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
@@ -123,7 +124,6 @@ def check_registry_key_exists(key_path):
         root_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
         key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
         winreg.SetValueEx(root_key, "URL Protocol", 0, winreg.REG_SZ, "")
-    # path = os.path.join(os.getcwd(), os.path.basename(sys.argv[0]))
     path = f'"{os.path.abspath(sys.argv[0])}" "%1"'
     winreg.SetValueEx(key, "", 0, winreg.REG_SZ, path)
     winreg.CloseKey(root_key)
@@ -271,8 +271,11 @@ class PixivDownloader:
                     self.app.update_progress_bar(1)
 
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
+            logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
+            os.startfile(self.mkdirs)
             if if_exit_finish:
-                logging.info("程序已自动退出")
+                time.sleep(3)
+                logging.info("程序即将自动退出~")
                 root.destroy()
 
         except IndexError:
@@ -603,9 +606,9 @@ class PixivApp:
         self.log_text = Text(self.root, height=10)
         self.log_text.pack(fill='both', expand=True)
         self.log_text.insert('1.0',  # 插入默认日志信息
-                             '|欢迎使用 PIXIV 图片下载器 ！                                                   |\n'  
-                             '|填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。|\n'
-                             '|-------------------------------------------------------------------------------|\n')
+                             '欢迎使用 PIXIV 图片下载器 ！\n'
+                             '填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。\n'
+                             '---------------------------------------------------------------------------------------------------\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
 
     # 是否查看画师主页
@@ -677,21 +680,22 @@ if __name__ == '__main__':
     artwork_id = None
     is_start_now = False
     if_exit_finish = False
+    args = sys.argv
 
     # 获取命令行参数
     if len(sys.argv) > 1:
         url_get = sys.argv[1]
         if '/' in url_get:
-            sys.argv = url_get.split('/')
+            args = url_get.split('/')
 
     # 命令行参数解析
-    for arg in sys.argv:
+    for arg in args:
         if arg == "-worker-id":
-            worker_id = sys.argv[sys.argv.index(arg) + 1]
+            worker_id = args[args.index(arg) + 1]
         elif arg == "-artwork-id":
-            artwork_id = sys.argv[sys.argv.index(arg) + 1]
+            artwork_id = args[args.index(arg) + 1]
         elif arg == "-cookie":
-            cookie = sys.argv[sys.argv.index(arg) + 1]
+            cookie = args[args.index(arg) + 1]
         elif arg == "--start-now":
             is_start_now = True
         elif arg == "--exit-finish":
