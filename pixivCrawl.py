@@ -62,7 +62,7 @@ def create_directory(*base_dir):
        返回创建的目录路径，或者已经存在的目录路径。
        """
     script_path = os.path.abspath(sys.argv[0])
-    parent_dir = os.path.dirname(os.path.dirname(script_path))
+    parent_dir = os.path.dirname(script_path)
     mkdir = os.path.join(parent_dir, *base_dir)
     os.makedirs(mkdir, exist_ok=True)
     return mkdir
@@ -273,8 +273,8 @@ class PixivDownloader:
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             os.startfile(self.mkdirs)
             if if_exit_finish:
-                time.sleep(3)
                 logging.info("程序即将自动退出~")
+                time.sleep(3)
                 root.destroy()
 
         except IndexError:
