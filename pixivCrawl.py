@@ -111,7 +111,7 @@ def log_init():
 # 创建注册表键
 def check_registry_key_exists(key_path):
     if not ctypes.windll.shell32.IsUserAnAdmin():
-        logging.error("请以管理员权限运行本程序。")
+        logging.warning("请以管理员权限运行本程序(非浏览器插件打开请无视~)")
         return
 
     try:
@@ -157,7 +157,7 @@ def update_json(data_id):
     with open(json_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    data["PHPSESSID"] = data_id
+    data["PHPSESSID"] = data_id.replace("PHPSESSID=", "")
 
     with open(json_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False, indent=4))
@@ -178,10 +178,9 @@ class PixivDownloader:
         self.artist = ""  # 画师名字
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
-        self.cookie = cookie_id if cookie_id != "" else cookie
-
+        self.cookie = f'PHPSESSID={cookie_id}' if cookie_id != '' else f'PHPSESSID={cookie}'
         # 更新cookie
-        if self.cookie != cookie and self.cookie != "":
+        if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
             update_json(self.cookie)
 
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
@@ -681,7 +680,7 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = f'PHPSESSID={open_json()["PHPSESSID"]}'
+    cookie = f'{open_json()["PHPSESSID"]}'
     user_agent = open_json()["user_agent"]
 
     root = Tk()
@@ -709,7 +708,7 @@ if __name__ == '__main__':
         elif arg == "-artwork-id":
             artwork_id = args[args.index(arg) + 1]
         elif arg == "-cookie":
-            cookie = args[args.index(arg) + 1]
+            cookie = args[args.index(arg) + 1].replace("PHPSESSID=", "")
         elif arg == "--start-now":
             is_start_now = True
         elif arg == "--exit-finish":
