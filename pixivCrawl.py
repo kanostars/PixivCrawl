@@ -1,3 +1,4 @@
+import ctypes
 import re
 import sys
 import time
@@ -76,10 +77,9 @@ def touch(file_path):
 
 # 获取资源文件的绝对路径
 def resource_path(relative_path):
-    try:
-        # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
-        base_path = getattr(sys, '_MEIPASS', None)
-    except AttributeError:
+    # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
+    base_path = getattr(sys, '_MEIPASS', None)
+    if base_path is None:
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
@@ -110,6 +110,10 @@ def log_init():
 
 # 创建注册表键
 def check_registry_key_exists(key_path):
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        logging.error("请以管理员权限运行本程序。")
+        return
+
     try:
         # 尝试打开注册表键
         root_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
@@ -156,8 +160,7 @@ def update_json(data_id):
     data["PHPSESSID"] = data_id
 
     with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
+        f.write(json.dumps(data, ensure_ascii=False, indent=4))
     logging.info(f"成功更新配置文件，下次失效时再进行填写。")
 
 
@@ -502,11 +505,22 @@ class TkinterLogHandler(logging.Handler):
     def __init__(self, text_widget):
         super().__init__()
         self.text_widget = text_widget  # 保存Text控件作为日志输出目标
+        self.configure_tags()
+
+    def configure_tags(self):
+        # 定义不同日志级别的样式
+        self.text_widget.tag_configure("DEBUG", foreground="blue")
+        self.text_widget.tag_configure("INFO", foreground="black")
+        self.text_widget.tag_configure("WARNING", foreground="#FF7608")
+        self.text_widget.tag_configure("ERROR", foreground="red")
+        self.text_widget.tag_configure("CRITICAL", foreground="purple")
 
     def emit(self, record):
         msg = self.format(record)
+        log_level = record.levelname  # 获取日志级别
+
         self.text_widget.configure(state='normal')
-        self.text_widget.insert('end', msg + '\n')
+        self.text_widget.insert('end', msg + '\n', log_level)  # 使用日志级别作为标签
         self.text_widget.see('end')
         self.text_widget.configure(state='disabled')
 
@@ -603,6 +617,7 @@ class PixivApp:
 
         # 日志显示区域
         self.log_text = Text(self.root, height=10)
+        self.log_text.tag_configure("red", foreground="red")
         self.log_text.pack(fill='both', expand=True)
         self.log_text.insert('1.0',  # 插入默认日志信息
                              '欢迎使用 PIXIV 图片下载器 ！\n'
