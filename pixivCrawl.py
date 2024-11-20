@@ -33,18 +33,6 @@ def thread_it(func, *args):
 
 # 判断响应码
 def request_if_error(response):
-    """
-       检查响应对象是否有错误状态码。
-
-       如果响应状态码表示有错误（即状态码不为2xx），则记录错误日志并抛出异常。
-       这个函数主要用于HTTP请求的错误处理。
-
-       参数:
-       response: requests.Response对象，代表HTTP响应。
-
-       异常:
-       抛出requests.exceptions.RequestException，如果响应状态码表示有错误。
-       """
     try:
         response.raise_for_status()
     except requests.exceptions.RequestException:
@@ -53,16 +41,7 @@ def request_if_error(response):
 
 # 创建文件夹
 def create_directory(*base_dir):
-    """
-       根据给定的目录参数创建目录。
-
-       参数:
-       *base_dir: 可变数量的参数，代表需要创建的目录层级。每个参数代表目录层级中的一个部分。
-
-       返回值:
-       返回创建的目录路径，或者已经存在的目录路径。
-       """
-    script_path = os.path.abspath(sys.argv[0])
+    script_path = os.path.abspath(sys.argv[0])  # 获取绝对路径
     parent_dir = os.path.dirname(script_path)
     mkdir = os.path.join(parent_dir, *base_dir)
     os.makedirs(mkdir, exist_ok=True)
@@ -88,7 +67,7 @@ def resource_path(relative_path):
 def log_init():
     # 创建日志记录器
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
     # 创建文件处理器，将日志写入文件
@@ -111,7 +90,7 @@ def log_init():
 # 创建注册表键
 def check_registry_key_exists(key_path):
     if not ctypes.windll.shell32.IsUserAnAdmin():
-        logging.warning("请以管理员权限运行本程序(非浏览器插件打开请无视~)")
+        logging.warning("请以管理员权限运行本程序")
         return
 
     try:
@@ -134,8 +113,8 @@ def check_registry_key_exists(key_path):
 
 
 # 读取json文件
-def open_json():
-    json_file = resource_path("pixivCrawl.json")
+def read_json():
+    json_file = "pixivCrawl.json"
     default_data = {
         "PHPSESSID": "",
         "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
@@ -167,12 +146,6 @@ def update_json(data_id):
 # p站图片下载器
 class PixivDownloader:
     def __init__(self, cookie_id, pixiv_app):
-        """
-           初始化Pixiv下载器类的构造函数。
-
-           :param cookie_id: 用户的Cookie ID，用于登录认证。
-           :param pixiv_app: Pixiv应用实例，用于与Pixiv API进行交互。
-        """
         self.app = pixiv_app
         self.type = ""  # 输入的id类型
         self.artist = ""  # 画师名字
@@ -182,7 +155,6 @@ class PixivDownloader:
         # 更新cookie
         if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
             update_json(self.cookie)
-
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
@@ -195,20 +167,6 @@ class PixivDownloader:
         self.s.mount('https://', adapter)
 
     def download_and_save_image(self, url, save_path, start_size, end_size=''):
-        """
-           下载并保存图片。
-
-           根据给定的URL和保存路径，以及指定的字节范围，下载图片并保存到本地。
-
-           参数:
-           url (str): 图片的URL地址。
-           save_path (str): 图片保存的本地路径。
-           start_size (str): 下载图片的起始字节位置。
-           end_size (str, optional): 下载图片的结束字节位置。默认为空，表示下载到图片结尾。
-
-           返回:
-           无
-        """
         # 根据起始和结束位置构建HTTP请求的Range头
         byte_range = f'bytes={start_size}-{end_size}'
         d_headers = {
@@ -226,16 +184,6 @@ class PixivDownloader:
         self.app.update_progress_bar(1)  # 更新进度条
 
     def download_images(self, img_ids, t):
-        """
-           根据提供的img_ids和类型t下载图片。
-
-           参数:
-           img_ids (list): 图片ID列表。
-           t (str): 下载类型，可以是'artist'（画师）或'artWork'（插画）。
-
-           返回:
-           无
-        """
         try:
             self.type = t
             self.artist = self.get_worker_name(img_ids[0])
@@ -283,15 +231,6 @@ class PixivDownloader:
             logging.warning("未找到该画师,请重新输入~")
 
     def get_worker_name(self, img_id):
-        """
-            根据图片ID获取画师名字。
-
-            参数:
-            img_id (int): 图片的唯一标识符。
-
-            返回:
-            str: 画师的名字，如果找不到则返回None。
-        """
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = self.s.get(artworks_id, headers=self.headers, verify=False)
         soup = BeautifulSoup(requests_worker.text, 'html.parser')
@@ -304,18 +243,6 @@ class PixivDownloader:
         return None
 
     def download_by_art_worker_ids(self, img_ids):
-        """
-           并发下载插画作品。
-
-           利用ThreadPoolExecutor创建一个最多可同时运行64个线程的线程池。
-           对于每个插画id，提交一个下载任务到线程池，异步执行下载操作。
-
-           参数:
-           img_ids (list): 插画id列表，用于指定需要下载的插画作品。
-
-           返回:
-           无
-        """
         with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
             futures = []
             for img_id in img_ids:
@@ -326,15 +253,6 @@ class PixivDownloader:
             future.result()
 
     def download_by_art_worker_id(self, img_id):
-        """
-           根据插画ID判断插画的类型。
-
-           如果下载的是ugoira类型的作品（一种动画图像格式），则调用下载动图的方法；
-           否则，调用下载静态图片的方法。
-
-           参数:
-           img_id (int): 插画ID。
-        """
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
         response = self.s.get(url=ugoira_url, headers=self.headers, verify=False)
         data = response.json()
@@ -345,17 +263,6 @@ class PixivDownloader:
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
-        """
-           下载静态图片
-
-           通过给定的图片ID，请求并下载对应的静态图片资源
-
-           参数:
-           img_id (str): 图片的唯一标识符
-
-           返回:
-           无
-        """
         response = self.s.get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers,
                               verify=False)
         request_if_error(response)
@@ -372,18 +279,6 @@ class PixivDownloader:
             self.add_download_queue(url, file_path, resp)
 
     def download_gifs(self, data, img_id):
-        """
-           下载GIF图像。
-
-           该方法从提供的数据中提取帧延迟和原始URL，构造文件名和路径，并发起HTTP请求以下载GIF图像。
-
-           参数:
-           - data: 包含GIF图像信息的字典，包括帧延迟和原始URL。
-           - img_id: 图像的唯一标识符，用于构造文件名和引用。
-
-           返回:
-           无直接返回值，但会触发GIF图像的下载，并将延迟信息存储在实例变量中。
-        """
         delays = [frame['delay'] for frame in data['body']['frames']]  # 帧延迟信息
         url = data['body']['originalSrc']  # GIF图像的原始URL
         name = f"@{self.artist} {img_id}.zip"
@@ -395,20 +290,6 @@ class PixivDownloader:
         self.add_download_queue(url, file_path, resp)
 
     def add_download_queue(self, url, file_path, response):
-        """
-           添加下载任务到下载队列中。
-
-           根据文件的大小，将文件分割成多个部分，每个部分使用一个下载任务。
-           如果无法获取文件大小（Content-Length），则对整个文件不分块下载。
-
-           参数:
-           - url: 下载链接的URL。
-           - file_path: 保存下载文件的路径。
-           - response: HTTP响应对象，用于获取文件大小。
-
-           返回值:
-           无
-        """
         self.numbers += 1
         try:
             length = int(response.headers['Content-Length'])
@@ -422,18 +303,6 @@ class PixivDownloader:
             self.download_queue.append((url, file_path, '', ''))
 
     def comp_gif(self, img_id):
-        """
-          根据给定的img_id合成GIF动画并保存。
-
-          该函数从need_com_gif字典中获取指定img_id的延迟时间列表，构造GIF文件名和ZIP文件名，
-          然后从ZIP文件中读取所有图片文件，将其转换为RGBA模式，并合并为GIF动画，最后删除ZIP文件
-
-          参数:
-          img_id (str): 图像ID，用于标识特定的ZIP文件和生成的GIF文件。
-
-          返回:
-          无
-        """
         delays = self.need_com_gif[img_id]
         name = f"@{self.artist} {img_id}.gif"
         o_name = f"@{self.artist} {img_id}.zip"
@@ -455,33 +324,13 @@ class PixivDownloader:
 
 # 通过输入框获取id下载图片
 class ThroughId(PixivDownloader):
-    """
-       根据ID下载Pixiv上的图片。
-
-       继承自PixivDownloader类，提供了根据画师ID或作品ID下载图片的功能。
-
-       属性:
-       - cookie_id: 用于登录Pixiv的cookie ID。
-       - id: 画师ID或作品ID。
-       - pixiv_app: Pixiv应用的相关信息。
-       - t: 下载类型，决定是通过画师id下载ta的所有作品，
-            还是通过插画id下载对于的作品。
-    """
-
     def __init__(self, cookie_id, id, pixiv_app, t):
         super().__init__(cookie_id, pixiv_app)
         self.id = id
         self.type = t
 
+    # 获取用户的所以作品id
     def get_img_ids(self):
-        """
-           获取用户的所有作品ID。
-
-           通过发送GET请求到Pixiv的用户profile页面，解析返回的JSON数据来获取作品ID。
-
-           返回:
-           - 一个包含所有作品ID的列表。
-        """
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
         response = requests.get(id_url, headers=self.headers, verify=False)
         return re.findall(r'"(\d+)":null', response.text)
@@ -496,11 +345,8 @@ class ThroughId(PixivDownloader):
             self.download_images(img_ids, self.type)
 
 
+# 创建日志输出
 class TkinterLogHandler(logging.Handler):
-    """
-        该类继承自logging.Handler，用于将日志消息定向到Tkinter的Text控件中。
-    """
-
     def __init__(self, text_widget):
         super().__init__()
         self.text_widget = text_widget  # 保存Text控件作为日志输出目标
@@ -634,7 +480,9 @@ class PixivApp:
 
     # 提交id
     def submit_id(self, t):
+        global cookie
         try:
+            cookie = f'{read_json()["PHPSESSID"]}'
             # 防止用户在处理期间进行交互
             self.button_artist.config(state=DISABLED)
             self.button_artwork.config(state=DISABLED)
@@ -680,8 +528,8 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = f'{open_json()["PHPSESSID"]}'
-    user_agent = open_json()["user_agent"]
+    cookie = ''
+    user_agent = read_json()["user_agent"]
 
     root = Tk()
     app = PixivApp(root)
