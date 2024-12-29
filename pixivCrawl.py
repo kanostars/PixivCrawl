@@ -19,6 +19,8 @@ from PIL import Image
 from requests.adapters import HTTPAdapter
 import winreg
 
+from NoVPNConnect import ConnectHelper
+
 urllib3.disable_warnings()
 
 TYPE_WORKER = "artist"  # 类型是画师
@@ -152,6 +154,7 @@ class PixivDownloader:
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
         self.cookie = f'PHPSESSID={cookie_id}' if cookie_id != '' else f'PHPSESSID={cookie}'
+        self.connect_helper = ConnectHelper()
 
         # 更新cookie
         if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
@@ -167,6 +170,8 @@ class PixivDownloader:
         adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
+
+        self.s = self.connect_helper
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
         # 根据起始和结束位置构建HTTP请求的Range头
