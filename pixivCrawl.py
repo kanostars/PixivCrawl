@@ -152,9 +152,11 @@ class PixivDownloader:
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
         self.cookie = f'PHPSESSID={cookie_id}' if cookie_id != '' else f'PHPSESSID={cookie}'
+
         # 更新cookie
         if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
             update_json(self.cookie)
+
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
@@ -216,12 +218,13 @@ class PixivDownloader:
             self.app.update_progress_bar(0, len(img_ids))
 
             self.download_by_art_worker_ids(img_ids)
-
             self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
+
             logging.info(f"检索结束...")
             if self.numbers == 0:
                 logging.warning("PHPSESSID已失效，请重新填写!")
                 return
+
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 futures = []
@@ -502,7 +505,8 @@ class PixivApp:
     def submit_id(self, t):
         global cookie
         try:
-            cookie = f'{read_json()["PHPSESSID"]}'
+            if cookie == '':
+                cookie = f'{read_json()["PHPSESSID"]}'
             # 防止用户在处理期间进行交互
             self.button_artist.config(state=DISABLED)
             self.button_artwork.config(state=DISABLED)
@@ -566,6 +570,7 @@ if __name__ == '__main__':
     # 获取命令行参数
     if len(sys.argv) > 1:
         url_get = sys.argv[1]
+        logging.debug(f"获取的参数为：{url_get}")
         if '/' in url_get:
             args = url_get.split('/')
 
@@ -577,6 +582,7 @@ if __name__ == '__main__':
             artwork_id = args[args.index(arg) + 1]
         elif arg == "-cookie":
             cookie = args[args.index(arg) + 1].replace("PHPSESSID=", "")
+            logging.debug(f"浏览器获取的cookie为：{cookie}")
         elif arg == "--start-now":
             is_start_now = True
         elif arg == "--exit-finish":
