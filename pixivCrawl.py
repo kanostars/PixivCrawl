@@ -102,7 +102,7 @@ def check_registry_key_exists(key_path):
         key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
     except FileNotFoundError:
         # 创建注册表键
-        print("注册表键不存在，创建中...")
+        logging.info("注册表键不存在，创建中...")
         root_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
         key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
         winreg.SetValueEx(root_key, "URL Protocol", 0, winreg.REG_SZ, "")
@@ -124,7 +124,7 @@ def read_json():
             data = json.load(f)
             return data
     except FileNotFoundError:
-        print("未找到配置文件，正在创建默认配置文件。")
+        logging.info("未找到配置文件，正在创建默认配置文件。")
         with open(json_file, 'w', encoding='utf-8') as f:
             json.dump(default_data, f, ensure_ascii=False, indent=4)
         return default_data
@@ -174,10 +174,15 @@ class PixivDownloader:
             'referer': 'https://www.pixiv.net/',
             'Range': byte_range
         }
+
+        if start_size == '':
+            logging.debug("Range头删除")
+            d_headers.pop('Range', None)
+
         resp = self.s.get(url, headers=d_headers, verify=False)
         length = int(resp.headers['Content-Length'])
+        logging.debug(f'start_size：{start_size}  end_size：{end_size}  length：{length}')
 
-        logging.debug(f'{start_size}:{end_size}:{length}')
         if type(start_size) == int and length > end_size - start_size + 1:
             with open(save_path, 'rb+') as f:
                 f.seek(0, 0)
