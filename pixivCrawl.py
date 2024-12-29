@@ -186,7 +186,7 @@ class PixivDownloader:
             logging.debug("Range头删除")
             d_headers.pop('Range', None)
 
-        resp = self.s.get(url, headers=d_headers, verify=False)
+        resp = ConnectHelper().get(url, headers=d_headers)
         try:
             length = int(resp.headers['Content-Length'])
         except KeyError:
@@ -205,7 +205,7 @@ class PixivDownloader:
                 f.seek(0, 0)
             else:
                 f.seek(int(start_size), 0)
-            f.write(resp.content)
+            f.write(resp.get_content())
         self.app.update_progress_bar(1)  # 更新进度条
 
     def download_images(self, img_ids, t):
@@ -260,8 +260,11 @@ class PixivDownloader:
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
-        requests_worker = self.s.get(artworks_id, headers=self.headers, verify=False)
-        soup = BeautifulSoup(requests_worker.text, 'html.parser')
+        requests_worker = ConnectHelper().get(artworks_id, headers=self.headers)
+
+        # print(requests_worker.get_content())
+        soup = BeautifulSoup(requests_worker.get_content(), 'html.parser')
+
         meta_tag = str(soup.find_all('meta')[-1])
         # 获取画师名字
         worker_url = re.findall(f'"userName":"(.*?)"', meta_tag)
@@ -282,8 +285,10 @@ class PixivDownloader:
 
     def download_by_art_worker_id(self, img_id):
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
-        response = self.s.get(url=ugoira_url, headers=self.headers, verify=False)
-        data = response.json()
+
+        response = ConnectHelper().get(ugoira_url, headers=self.headers).get_text()
+
+        data = json.loads(response)
         if data['error']:  # 是静态图
             self.download_static_images(img_id)
         else:  # 是动图
@@ -291,18 +296,19 @@ class PixivDownloader:
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
-        response = self.s.get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers,
-                              verify=False)
-        request_if_error(response)
+        response = ConnectHelper().get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
+
+        # request_if_error(response)
         # 解析响应以获取所有静态图片的URL
-        static_url = json.loads(response.text)['body']
+        print(response.get_text())
+        static_url = json.loads(response.get_text())['body']
         for urls in static_url:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
             name = os.path.basename(url)
             file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
             touch(file_path)
-            resp = self.s.get(url=url, headers=self.headers, verify=False)
+            resp = ConnectHelper().get(url=url, headers=self.headers)
 
             self.add_download_queue(url, file_path, resp)
 
@@ -314,7 +320,7 @@ class PixivDownloader:
         touch(file_path)
         self.need_com_gif[img_id] = delays
 
-        resp = self.s.get(url, headers=self.headers, verify=False)
+        resp = ConnectHelper().get(url, headers=self.headers)
         self.add_download_queue(url, file_path, resp)
 
     def add_download_queue(self, url, file_path, response):
@@ -357,11 +363,11 @@ class ThroughId(PixivDownloader):
         self.id = id
         self.type = t
 
-    # 获取用户的所以作品id
+    # 获取用户的所有作品id
     def get_img_ids(self):
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
-        response = requests.get(id_url, headers=self.headers, verify=False)
-        return re.findall(r'"(\d+)":null', response.text)
+        response = ConnectHelper().get(id_url, headers=self.headers)
+        return re.findall(r'"(\d+)":null', response.get_text())
 
     def pre_download(self):
         if self.type == TYPE_ARTWORKS:

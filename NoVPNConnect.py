@@ -1,6 +1,7 @@
 import socket
 import ssl
 
+
 class ConnectParent:
     def __init__(self):
         # 创建SSL上下文，禁用主机名检查
@@ -99,8 +100,6 @@ class ConnectParent:
             s2.close()
 
 
-
-
 class ConnectMain(ConnectParent):
     def __init__(self):
         super().__init__()
@@ -116,6 +115,7 @@ class ConnectImg(ConnectParent):
 
         self.hostname = '210.140.139.133'
 
+
 class ConnectHelper:
     def __init__(self):
         self.conn_main = ConnectMain()
@@ -126,7 +126,6 @@ class ConnectHelper:
             return self.conn_main.get(url, headers)
         if 'pximg.net' in url:
             return self.conn_img.get(url, headers)
-
 
 
 if __name__ == '__main__':
