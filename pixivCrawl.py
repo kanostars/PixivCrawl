@@ -180,7 +180,10 @@ class PixivDownloader:
             d_headers.pop('Range', None)
 
         resp = self.s.get(url, headers=d_headers, verify=False)
-        length = int(resp.headers['Content-Length'])
+        try:
+            length = int(resp.headers['Content-Length'])
+        except KeyError:
+            length = 0
         logging.debug(f'start_size：{start_size}  end_size：{end_size}  length：{length}')
 
         if type(start_size) == int and length > end_size - start_size + 1:
