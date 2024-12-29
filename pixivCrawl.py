@@ -166,7 +166,7 @@ class PixivDownloader:
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
 
-    def download_and_save_image(self, url, save_path, start_size, end_size=''):
+    def download_and_save_image(self, url, save_path, start_size, end_size):
         # 根据起始和结束位置构建HTTP请求的Range头
         byte_range = f'bytes={start_size}-{end_size}'
         d_headers = {
@@ -175,6 +175,16 @@ class PixivDownloader:
             'Range': byte_range
         }
         resp = self.s.get(url, headers=d_headers, verify=False)
+        length = int(resp.headers['Content-Length'])
+
+        logging.debug(f'{start_size}:{end_size}:{length}')
+        if type(start_size) == int and length > end_size - start_size + 1:
+            with open(save_path, 'rb+') as f:
+                f.seek(0, 0)
+                f.write(resp.content)
+            self.app.update_progress_bar(1)  # 更新进度条
+            return
+
         with open(save_path, 'rb+') as f:
             if start_size == '':
                 f.seek(0, 0)
@@ -196,6 +206,7 @@ class PixivDownloader:
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = create_directory("artworks_IMG", img_ids[0])
             self.app.update_progress_bar(0, len(img_ids))
+
             self.download_by_art_worker_ids(img_ids)
 
             self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
@@ -207,6 +218,7 @@ class PixivDownloader:
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 futures = []
                 for (url, save_path, start_size, end_size) in self.download_queue:
+                    logging.debug(f"{url} {save_path} {start_size} {end_size}")
                     f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
                     futures.append(f)
             for future in as_completed(futures):
@@ -297,7 +309,7 @@ class PixivDownloader:
             while i < length - self.download_size:
                 self.download_queue.append((url, file_path, i, i + self.download_size - 1))
                 i += self.download_size
-            self.download_queue.append((url, file_path, i, ''))
+            self.download_queue.append((url, file_path, i, length-1))
         except KeyError:
             # 如果无法获取文件大小，则对整个文件不分块下载
             self.download_queue.append((url, file_path, '', ''))
