@@ -4,7 +4,6 @@ import sys
 import time
 from logging.handlers import TimedRotatingFileHandler
 from tkinter.ttk import Progressbar
-import requests
 import urllib3
 import json
 from bs4 import BeautifulSoup
@@ -16,10 +15,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import zipfile
 from PIL import Image
-from requests.adapters import HTTPAdapter
 import winreg
 
-from NoVPNConnect import ConnectHelper
+import NoVPNConnect
 
 urllib3.disable_warnings()
 
@@ -31,14 +29,6 @@ def thread_it(func, *args):
     thread = threading.Thread(target=func, args=args)
     thread.daemon = True
     thread.start()
-
-
-# 判断响应码
-def request_if_error(response):
-    try:
-        response.raise_for_status()
-    except requests.exceptions.RequestException:
-        logging.error(f"请求失败，状态码: {response.status_code}")
 
 
 # 创建文件夹
@@ -154,7 +144,6 @@ class PixivDownloader:
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
         self.cookie = f'PHPSESSID={cookie_id}' if cookie_id != '' else f'PHPSESSID={cookie}'
-        self.connect_helper = ConnectHelper()
 
         # 更新cookie
         if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
@@ -164,14 +153,11 @@ class PixivDownloader:
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
         self.need_com_gif = {}  # 需要合成的动图
-        self.s = requests.Session()
 
-        # 配置HTTP和HTTPS连接的池和重试策略
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
-        self.s.mount('http://', adapter)
-        self.s.mount('https://', adapter)
-
-        self.s = self.connect_helper
+        # # 配置HTTP和HTTPS连接的池和重试策略
+        # adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
+        # self.s.mount('http://', adapter)
+        # self.s.mount('https://', adapter)
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
         # 根据起始和结束位置构建HTTP请求的Range头
@@ -186,7 +172,7 @@ class PixivDownloader:
             logging.debug("Range头删除")
             d_headers.pop('Range', None)
 
-        resp = ConnectHelper().get(url, headers=d_headers)
+        resp = NoVPNConnect.connect(url, headers=d_headers)
         try:
             length = int(resp.headers['Content-Length'])
         except KeyError:
@@ -260,7 +246,7 @@ class PixivDownloader:
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
-        requests_worker = ConnectHelper().get(artworks_id, headers=self.headers)
+        requests_worker = NoVPNConnect.connect(artworks_id, headers=self.headers)
 
         # print(requests_worker.get_content())
         soup = BeautifulSoup(requests_worker.get_content(), 'html.parser')
@@ -286,9 +272,9 @@ class PixivDownloader:
     def download_by_art_worker_id(self, img_id):
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
 
-        response = ConnectHelper().get(ugoira_url, headers=self.headers).get_text()
+        response = NoVPNConnect.connect(ugoira_url, headers=self.headers)
 
-        data = json.loads(response)
+        data = response.get_json()
         if data['error']:  # 是静态图
             self.download_static_images(img_id)
         else:  # 是动图
@@ -296,19 +282,18 @@ class PixivDownloader:
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
-        response = ConnectHelper().get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
+        response = NoVPNConnect.connect(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
 
         # request_if_error(response)
         # 解析响应以获取所有静态图片的URL
-        print(response.get_text())
-        static_url = json.loads(response.get_text())['body']
+        static_url = response.get_json()['body']
         for urls in static_url:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
             name = os.path.basename(url)
             file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
             touch(file_path)
-            resp = ConnectHelper().get(url=url, headers=self.headers)
+            resp = NoVPNConnect.connect(url=url, headers=self.headers)
 
             self.add_download_queue(url, file_path, resp)
 
@@ -320,7 +305,7 @@ class PixivDownloader:
         touch(file_path)
         self.need_com_gif[img_id] = delays
 
-        resp = ConnectHelper().get(url, headers=self.headers)
+        resp = NoVPNConnect.connect(url, headers=self.headers)
         self.add_download_queue(url, file_path, resp)
 
     def add_download_queue(self, url, file_path, response):
@@ -366,7 +351,7 @@ class ThroughId(PixivDownloader):
     # 获取用户的所有作品id
     def get_img_ids(self):
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
-        response = ConnectHelper().get(id_url, headers=self.headers)
+        response = NoVPNConnect.connect(id_url, headers=self.headers)
         return re.findall(r'"(\d+)":null', response.get_text())
 
     def pre_download(self):
@@ -538,10 +523,8 @@ class PixivApp:
                 if self.isArtworks():
                     webbrowser.open(f"https://www.pixiv.net/artworks/{ImgId}")
                 ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS).pre_download()
-        except requests.exceptions.ConnectTimeout:
-            logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
-        except requests.exceptions.RequestException as e:
-            logging.warning(f"网络请求失败: {e}")
+        except Exception as e:
+            logging.error(e)
         finally:
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)

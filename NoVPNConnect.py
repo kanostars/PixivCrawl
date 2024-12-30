@@ -1,5 +1,9 @@
+import json
+import logging
 import socket
 import ssl
+
+retry_times = 0
 
 
 class ConnectParent:
@@ -25,18 +29,27 @@ class ConnectParent:
         return self
 
     def get_headers(self):
-        if not self.nr is None:
+        if self.nr:
             headers = None
             while not headers:
                 headers, _, _ = next(self.nr)
             return headers
         else:
+            logging.warning('还未建立连接')
             return None
 
     def get_text(self):
-        if not self.get_content() is None:
-            return self.get_content().decode()
+        text = self.get_content()
+        if text:
+            return text.decode('utf-8', 'replace')
         return None
+
+    def get_json(self):
+        text = self.get_text()
+        if text:
+            logging.debug(text)
+            logging.debug(json.loads(text))
+            return json.loads(text)
 
     def get_content(self):
         if not self.nr is None:
@@ -57,7 +70,7 @@ class ConnectParent:
         }
         for z in zh.keys():
             self.headers[z] = zh.get(z)
-        # 包装socket对象为SSL套接字，并提供伪造的SNI
+        # 包装socket对象为SSL套接字
         s2 = self.context.wrap_socket(self.conn, server_hostname=self.hostname)
 
         # 构造一个简单的HTTP GET请求消息示例（你可以根据实际需求调整请求内容）
@@ -116,21 +129,15 @@ class ConnectImg(ConnectParent):
         self.hostname = '210.140.139.133'
 
 
-class ConnectHelper:
-    def __init__(self):
-        self.conn_main = ConnectMain()
-        self.conn_img = ConnectImg()
-
-    def get(self, url, headers=None):
-        if 'pixiv.net' in url or 'fanbox.cc' in url:
-            return self.conn_main.get(url, headers)
-        if 'pximg.net' in url:
-            return self.conn_img.get(url, headers)
+def connect(url, headers=None):
+    if 'pixiv.net' in url or 'fanbox.cc' in url:
+        return ConnectMain().get(url, headers)
+    if 'pximg.net' in url:
+        return ConnectImg().get(url, headers)
 
 
 if __name__ == '__main__':
-    conn = ConnectHelper()
-    resp = conn.get('https://i.pximg.net/img-original/img/2024/12/28/00/00/36/125608955_p0.png', headers={
+    resp = connect('https://i.pximg.net/img-original/img/2024/12/28/00/00/36/125608955_p0.png', headers={
         'Referer': 'https://www.pixiv.net/',
     })
     print(resp.get_headers())
