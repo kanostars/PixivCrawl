@@ -74,9 +74,29 @@ class ConnectParent:
             while not self.resp_finished:
                 self.resp_headers, self.resp_content, self.resp_finished = next(self.nr)
             logging.debug(self.resp_headers)
-            if self.resp_finished and self.resp_content[-1:] == b'0':
-                logging.debug('删除文件最后的0')
-                self.resp_content = self.resp_content[:-1]
+            if not self.resp_headers.get('Content-Length'):
+                logging.debug(f'分块传输方式')
+                all_data = self.resp_content
+                reconstructed_data = b''
+                index = 0
+                while index < len(all_data):
+                    # 查找下一个块大小描述部分的结束位置（即 \r\n 的位置）
+                    end_of_size = all_data.find(b'\r\n', index)
+                    if end_of_size == -1:
+                        break
+                    # 获取块大小描述部分的十六进制字符串，并转换为十进制整数
+                    chunk_size_hex = all_data[index:end_of_size].decode('utf-8')
+                    chunk_size = int(chunk_size_hex, 16)
+                    if chunk_size == 0:
+                        break
+                    # 移动到数据部分的起始位置（跳过块大小描述部分和 \r\n ）
+                    index = end_of_size + 2
+                    # 获取数据部分（根据块大小获取相应长度的数据）
+                    data_chunk = all_data[index:index + chunk_size]
+                    reconstructed_data += data_chunk
+                    # 移动到下一个块的起始位置（跳过数据部分后面的 \r\n ）
+                    index += chunk_size + 2
+                self.resp_content = reconstructed_data
             return self.resp_content
         else:
             return None

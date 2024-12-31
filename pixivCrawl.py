@@ -381,7 +381,8 @@ class PixivApp:
         self.input_var_artwork = StringVar()  # 接受作品uid
         self.inputCookie_var = StringVar()  # 接受登陆后的cookie
         self.browser_path = StringVar() # 浏览器路径
-        self.browser_path.set(config.get('browser_path'))
+        if config.get('browser_path'):
+            self.browser_path.set(config.get('browser_path'))
         self.b_users = BooleanVar()  # 是否查看画师主页
         self.b_artworks = BooleanVar()  # 是否查看作品网页
 
@@ -506,21 +507,21 @@ class PixivApp:
             self.button_artwork.config(state=DISABLED)
             cookie_id = self.inputCookie_var.get()
             if t == TYPE_WORKER:  # 画师
-                worker_id = self.input_var_worker.get()
-                if worker_id == '':
+                input_worker_id = self.input_var_worker.get()
+                if input_worker_id == '':
                     logging.warning('输入的画师id不能为空~~')
                     return
                 if self.is_workers():
-                    webbrowser.open(f"https://www.pixiv.net/users/{worker_id}")
-                ThroughId(cookie_id, worker_id, app, TYPE_WORKER).pre_download()
+                    webbrowser.open(f"https://www.pixiv.net/users/{input_worker_id}")
+                ThroughId(cookie_id, input_worker_id, app, TYPE_WORKER).pre_download()
             elif t == TYPE_ARTWORKS:  # 插画
-                img_id = self.input_var_artwork.get()
-                if img_id == '':
+                input_img_id = self.input_var_artwork.get()
+                if input_img_id == '':
                     logging.warning('输入的插画id不能为空~~')
                     return
                 if self.is_artworks():
-                    webbrowser.open(f"https://www.pixiv.net/artworks/{img_id}")
-                ThroughId(cookie_id, img_id, app, TYPE_ARTWORKS).pre_download()
+                    webbrowser.open(f"https://www.pixiv.net/artworks/{input_img_id}")
+                ThroughId(cookie_id, input_img_id, app, TYPE_ARTWORKS).pre_download()
         except Exception as e:
             logging.error(e)
         finally:
