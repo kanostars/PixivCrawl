@@ -2,9 +2,12 @@ import json
 import logging
 import socket
 import ssl
+import subprocess
 import threading
+import os
 
 retry_times = 0
+browser_list = ['chrome.exe', 'msedge.exe']
 
 
 class ConnectParent:
@@ -154,3 +157,21 @@ def connect(url, headers=None):
         return ConnectMain().get(url, headers)
     if 'pximg.net' in url:
         return ConnectImg().get(url, headers)
+
+def exec_cmd(cmd):
+    return subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+def open_pixiv(path):
+    if not path:
+        logging.warning('路径未填写')
+        return None
+    browser = os.path.basename(path)
+    if browser not in browser_list:
+        logging.warning('暂不支持该浏览器')
+        return None
+    exec_cmd(f'taskkill /F /IM {browser}').communicate()
+    pram = '--start-url https://www.pixiv.net --host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4" --host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133" --test-type --ignore-certificate-errors'
+    return exec_cmd(f'"{path}" {pram}')
+
+if __name__ == '__main__':
+    open_pixiv(r'C:\Users\zhizhu0\AppData\Local\Google\Chrome\Application\chrome.exe')

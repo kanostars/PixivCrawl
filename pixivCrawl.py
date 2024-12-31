@@ -8,6 +8,8 @@ import json
 from bs4 import BeautifulSoup
 import os
 from tkinter import *
+from tkinter import filedialog
+from tkinter import messagebox
 import webbrowser
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -129,7 +131,7 @@ def update_json(data):
 
     with open(json_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False, indent=4))
-    logging.info(f"成功更新配置文件，下次失效时再进行填写。")
+    logging.info(f"成功更新配置文件")
 
 
 # p站图片下载器
@@ -378,6 +380,8 @@ class PixivApp:
         self.input_var_worker = StringVar()  # 接受画师uid
         self.input_var_artwork = StringVar()  # 接受作品uid
         self.inputCookie_var = StringVar()  # 接受登陆后的cookie
+        self.browser_path = StringVar() # 浏览器路径
+        self.browser_path.set(config.get('browser_path'))
         self.b_users = BooleanVar()  # 是否查看画师主页
         self.b_artworks = BooleanVar()  # 是否查看作品网页
 
@@ -388,6 +392,20 @@ class PixivApp:
         # 图片框
         label_img = Label(self.root, image=self.root.img, width=800, height=200)
         label_img.pack(fill='both')
+
+        # 打开浏览器
+        browser_frame = LabelFrame(self.root)
+        browser_frame.pack(fill='both', anchor='n')
+        browser_label = Label(browser_frame, text='浏览器位置：', font=('黑体', 15))
+        browser_label.pack(side=LEFT)
+        browser_input = Entry(browser_frame, textvariable=self.browser_path)
+        browser_input.pack(side=LEFT)
+        browser_choose = Button(browser_frame, pady=-10, text='...', command=self.choose_browser_path)
+        browser_choose.pack(side=LEFT)
+        browser_button = Button(browser_frame, text='打开pixiv', command=self.open_browser)
+        browser_button.pack(side=LEFT)
+        browser_alarm = Label(browser_frame, text='警告：启动浏览器前将会关闭正在运行的浏览器')
+        browser_alarm.pack(side=LEFT)
 
         # 键入cookie
         message_cookie = LabelFrame(self.root)
@@ -459,6 +477,17 @@ class PixivApp:
                              '填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。\n'
                              '---------------------------------------------------------------------------------------------------\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
+
+    def choose_browser_path(self):
+        self.browser_path.set(filedialog.askopenfilename(title="选择浏览器", filetypes=[("exe文件", "*.exe")]))
+
+    def open_browser(self):
+        result = messagebox.askokcancel("警告", "打开浏览器时会将正在运行的浏览器关闭！")
+        if result:
+            if (NoVPNConnect.open_pixiv(self.browser_path.get()) and
+                    (not config.get('browser_path') or config.get('browser_path') != self.browser_path.get())):
+                config['browser_path'] = self.browser_path.get()
+                update_json(config)
 
     # 是否查看画师主页
     def is_workers(self):
