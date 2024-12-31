@@ -60,18 +60,18 @@ def log_init():
     # 创建日志记录器
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
-    LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+    log_format = "%(asctime)s - %(levelname)s - %(message)s"
 
     # 创建文件处理器，将日志写入文件
-    mkdirLog = create_directory("log")
-    file_handler = TimedRotatingFileHandler(os.path.join(mkdirLog, 'my.log'),
+    mkdir_log = create_directory("log")
+    file_handler = TimedRotatingFileHandler(os.path.join(mkdir_log, 'my.log'),
                                             when='midnight', interval=1, backupCount=7, encoding='utf-8')
-    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.setFormatter(logging.Formatter(log_format))
     file_handler.setLevel(logging.DEBUG)
 
     # 创建Tkinter日志处理器
     tkinter_handler = TkinterLogHandler(app.log_text)
-    tkinter_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    tkinter_handler.setFormatter(logging.Formatter(log_format))
     tkinter_handler.setLevel(logging.INFO)
 
     # 添加处理器到日志记录器
@@ -152,6 +152,7 @@ class PixivDownloader:
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
+        self.downloading_resp = []
         self.need_com_gif = {}  # 需要合成的动图
 
         # # 配置HTTP和HTTPS连接的池和重试策略
@@ -159,40 +160,19 @@ class PixivDownloader:
         # self.s.mount('http://', adapter)
         # self.s.mount('https://', adapter)
 
-    def download_and_save_image(self, url, save_path, start_size, end_size):
-        # 根据起始和结束位置构建HTTP请求的Range头
-        byte_range = f'bytes={start_size}-{end_size}'
+    def download_and_save_image(self, url, save_path):
         d_headers = {
             'User-Agent': user_agent,
-            'referer': 'https://www.pixiv.net/',
-            'Range': byte_range
+            'Referer': 'https://www.pixiv.net/',
+            'Accept-Transfer-Encoding': 'identity'
         }
 
-        if start_size == '':
-            logging.debug("Range头删除")
-            d_headers.pop('Range', None)
-
         resp = NoVPNConnect.connect(url, headers=d_headers)
-        try:
-            length = int(resp.headers['Content-Length'])
-        except KeyError:
-            length = 0
-        logging.debug(f'start_size：{start_size}  end_size：{end_size}  length：{length}')
-
-        if type(start_size) == int and length > end_size - start_size + 1:
-            with open(save_path, 'rb+') as f:
-                f.seek(0, 0)
-                f.write(resp.content)
-            self.app.update_progress_bar(1)  # 更新进度条
-            return
+        self.downloading_resp.append(resp)
 
         with open(save_path, 'rb+') as f:
-            if start_size == '':
-                f.seek(0, 0)
-            else:
-                f.seek(int(start_size), 0)
+            f.seek(0, 0)
             f.write(resp.get_content())
-        self.app.update_progress_bar(1)  # 更新进度条
 
     def download_images(self, img_ids, t):
         try:
@@ -206,10 +186,8 @@ class PixivDownloader:
                 self.mkdirs = create_directory("workers_IMG", self.artist)
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = create_directory("artworks_IMG", img_ids[0])
-            self.app.update_progress_bar(0, len(img_ids))
 
             self.download_by_art_worker_ids(img_ids)
-            self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
 
             logging.info(f"检索结束...")
             if self.numbers == 0:
@@ -217,21 +195,23 @@ class PixivDownloader:
                 return
 
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
+            self.app.update_progress_bar(0, len(self.download_queue))
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 futures = []
-                for (url, save_path, start_size, end_size) in self.download_queue:
-                    logging.debug(f"{url} {save_path} {start_size} {end_size}")
-                    f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
+                executor.submit(self.download_progress_updater)
+                for (url, save_path) in self.download_queue:
+                    logging.debug(f"{url} {save_path}")
+                    f = executor.submit(self.download_and_save_image, url, save_path)
                     futures.append(f)
-            for future in as_completed(futures):
-                future.result()
 
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar(0, len(self.need_com_gif))
+                com_count = 0
                 for img_id in self.need_com_gif:
                     self.comp_gif(img_id)
-                    self.app.update_progress_bar(1)
+                    com_count += 1
+                    self.app.update_progress_bar(com_count, len(self.need_com_gif))
 
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
@@ -243,6 +223,15 @@ class PixivDownloader:
 
         except IndexError:
             logging.warning("未找到该画师,请重新输入~")
+
+    def download_progress_updater(self):
+        while True:
+            f_download = 0
+            for resp in self.downloading_resp:
+                f_download += resp.get_content_progress()
+            self.app.update_progress_bar(f_download, len(self.download_queue))
+            if f_download >= len(self.download_queue):
+                break
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
@@ -265,9 +254,20 @@ class PixivDownloader:
             for img_id in img_ids:
                 f = executor.submit(self.download_by_art_worker_id, img_id)
                 futures.append(f)
-        # 等待所有下载任务完成
-        for future in as_completed(futures):
-            future.result()
+            # 等待所有下载任务完成
+            while True:
+                completed_count = 0
+                for future in futures:
+                    if future.done():
+                        completed_count += 1
+                self.app.update_progress_bar(completed_count, len(futures))
+                if completed_count == len(futures):
+                    break
+            # finish_count = 0
+            # for future in as_completed(futures):
+            #     future.result()
+            #     finish_count += 1
+            #     self.app.update_progress_bar(finish_count, len(img_ids))
 
     def download_by_art_worker_id(self, img_id):
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
@@ -279,12 +279,10 @@ class PixivDownloader:
             self.download_static_images(img_id)
         else:  # 是动图
             self.download_gifs(data, img_id)
-        self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
         response = NoVPNConnect.connect(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
 
-        # request_if_error(response)
         # 解析响应以获取所有静态图片的URL
         static_url = response.get_json()['body']
         for urls in static_url:
@@ -293,9 +291,8 @@ class PixivDownloader:
             name = os.path.basename(url)
             file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
             touch(file_path)
-            resp = NoVPNConnect.connect(url=url, headers=self.headers)
 
-            self.add_download_queue(url, file_path, resp)
+            self.add_download_queue(url, file_path)
 
     def download_gifs(self, data, img_id):
         delays = [frame['delay'] for frame in data['body']['frames']]  # 帧延迟信息
@@ -305,21 +302,20 @@ class PixivDownloader:
         touch(file_path)
         self.need_com_gif[img_id] = delays
 
-        resp = NoVPNConnect.connect(url, headers=self.headers)
-        self.add_download_queue(url, file_path, resp)
+        self.add_download_queue(url, file_path)
 
-    def add_download_queue(self, url, file_path, response):
+    def add_download_queue(self, url, file_path):
         self.numbers += 1
-        try:
-            length = int(response.headers['Content-Length'])
-            i = 0
-            while i < length - self.download_size:
-                self.download_queue.append((url, file_path, i, i + self.download_size - 1))
-                i += self.download_size
-            self.download_queue.append((url, file_path, i, length-1))
-        except KeyError:
-            # 如果无法获取文件大小，则对整个文件不分块下载
-            self.download_queue.append((url, file_path, '', ''))
+        # try:
+        #     length = int(response.headers['Content-Length'])
+        #     i = 0
+        #     while i < length - self.download_size:
+        #         self.download_queue.append((url, file_path, i, i + self.download_size - 1))
+        #         i += self.download_size
+        #     self.download_queue.append((url, file_path, i, length-1))
+        # except KeyError:
+        #     # 如果无法获取文件大小，则对整个文件不分块下载
+        self.download_queue.append((url, file_path))
 
     def comp_gif(self, img_id):
         delays = self.need_com_gif[img_id]
@@ -530,18 +526,27 @@ class PixivApp:
             self.button_artwork.config(state=NORMAL)
 
     # 更新进度条
-    def update_progress_bar(self, increment, total=0):
-        if total:  # 设置进度条最大值
-            self.total_progress = total
-            self.progress_bar["maximum"] = total
-            self.current_progress = 0
-        else:  # 更新进度条值
-            self.current_progress += increment
-        self.progress_bar["value"] = self.current_progress
+    # def update_progress_bar(self, increment, total=0):
+    #     if total:  # 设置进度条最大值
+    #         self.total_progress = total
+    #         self.progress_bar["maximum"] = total
+    #         self.current_progress = 0
+    #     else:  # 更新进度条值
+    #         self.current_progress += increment
+    #     self.progress_bar["value"] = self.current_progress
+    #     self.progress_bar.update()  # 刷新UI显示
+    #
+    #     # 更新文本显示
+    #     self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
+    #     self.root.update_idletasks()
+
+    def update_progress_bar(self, value, total):
+        self.progress_bar["value"] = value
+        self.progress_bar["maximum"] = total
         self.progress_bar.update()  # 刷新UI显示
 
         # 更新文本显示
-        self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
+        self.process_text.config(text=f"{(value / total * 100):.2f}%")
         self.root.update_idletasks()
 
 

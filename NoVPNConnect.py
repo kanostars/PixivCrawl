@@ -2,6 +2,7 @@ import json
 import logging
 import socket
 import ssl
+import threading
 
 retry_times = 0
 
@@ -20,6 +21,10 @@ class ConnectParent:
         self.url = ''
         self.headers = {}
 
+        self.resp_headers = None
+        self.resp_content = b''
+        self.resp_finished = False
+
     def get(self, url, headers=None):
         self.url = url
         self.headers = headers
@@ -28,12 +33,22 @@ class ConnectParent:
 
         return self
 
+    def get_content_progress(self) -> float:
+        if self.resp_finished:
+            return 1
+        if self.resp_headers:
+            try:
+                if int(self.resp_headers['Content-Length']) > 0:
+                    return len(self.resp_content) / int(self.resp_headers['Content-Length'])
+            except KeyError:
+                return 0
+        return 0
+
     def get_headers(self):
         if self.nr:
-            headers = None
-            while not headers:
-                headers, _, _ = next(self.nr)
-            return headers
+            while not self.resp_headers:
+                self.resp_headers, _, _ = next(self.nr)
+            return self.resp_headers
         else:
             logging.warning('还未建立连接')
             return None
@@ -53,11 +68,13 @@ class ConnectParent:
 
     def get_content(self):
         if not self.nr is None:
-            is_finish = False
-            content = b''
-            while not is_finish:
-                headers, content, is_finish = next(self.nr)
-            return content
+            while not self.resp_finished:
+                self.resp_headers, self.resp_content, self.resp_finished = next(self.nr)
+            logging.debug(self.resp_headers)
+            if self.resp_finished and self.resp_content[-1:] == b'0':
+                logging.debug('删除文件最后的0')
+                self.resp_content = self.resp_content[:-1]
+            return self.resp_content
         else:
             return None
 
@@ -71,9 +88,10 @@ class ConnectParent:
         for z in zh.keys():
             self.headers[z] = zh.get(z)
         # 包装socket对象为SSL套接字
+        logging.debug(f'{self.url} 开始连接')
         s2 = self.context.wrap_socket(self.conn, server_hostname=self.hostname)
 
-        # 构造一个简单的HTTP GET请求消息示例（你可以根据实际需求调整请求内容）
+        # 构造HTTP GET请求消息
         http_request = f'GET {self.url} HTTP/1.1\r\n'
         for h in self.headers.keys():
             http_request += f'{h}: {self.headers[h]}\r\n'
@@ -104,6 +122,8 @@ class ConnectParent:
                             if len(t) == 2:
                                 headers[t[0]] = t[1]
                         has_header = True
+
+                        logging.debug(f'{self.url} 获取到请求头 {headers}')
                 yield headers, response_data, False
             while True:
                 yield headers, response_data, True
@@ -134,12 +154,3 @@ def connect(url, headers=None):
         return ConnectMain().get(url, headers)
     if 'pximg.net' in url:
         return ConnectImg().get(url, headers)
-
-
-if __name__ == '__main__':
-    resp = connect('https://i.pximg.net/img-original/img/2024/12/28/00/00/36/125608955_p0.png', headers={
-        'Referer': 'https://www.pixiv.net/',
-    })
-    print(resp.get_headers())
-    # with open('cs2.png', 'wb') as f:
-    #     f.write(resp.get_content())
