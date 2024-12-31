@@ -163,3 +163,4 @@ cython_debug/
 /workers_IMG/
 /artworks_IMG/
 /log/
+/pixivCrawl.json

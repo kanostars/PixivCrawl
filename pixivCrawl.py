@@ -4,7 +4,6 @@ import sys
 import time
 from logging.handlers import TimedRotatingFileHandler
 from tkinter.ttk import Progressbar
-import urllib3
 import json
 from bs4 import BeautifulSoup
 import os
@@ -19,23 +18,28 @@ import winreg
 
 import NoVPNConnect
 
-urllib3.disable_warnings()
-
 TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
 
+relative_base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
+cookie = ''
+config = {}
 
-def thread_it(func, *args):
-    thread = threading.Thread(target=func, args=args)
+default_data = {
+    "cookie": "",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+}
+
+
+def thread_it(func, *type_args):
+    thread = threading.Thread(target=func, args=type_args)
     thread.daemon = True
     thread.start()
 
 
 # 创建文件夹
 def create_directory(*base_dir):
-    script_path = os.path.abspath(sys.argv[0])  # 获取绝对路径
-    parent_dir = os.path.dirname(script_path)
-    mkdir = os.path.join(parent_dir, *base_dir)
+    mkdir = os.path.join(relative_base_path, *base_dir)
     os.makedirs(mkdir, exist_ok=True)
     return mkdir
 
@@ -48,7 +52,7 @@ def touch(file_path):
 
 # 获取资源文件的绝对路径
 def resource_path(relative_path):
-    # PyInstaller 创建临时文件夹，所有 pyInstaller 程序运行时解压后的文件都在 _MEIPASS 中
+    # PyInstaller 临时文件夹
     base_path = getattr(sys, '_MEIPASS', None)
     if base_path is None:
         base_path = os.path.abspath(".")
@@ -106,11 +110,7 @@ def check_registry_key_exists(key_path):
 
 # 读取json文件
 def read_json():
-    json_file = "pixivCrawl.json"
-    default_data = {
-        "PHPSESSID": "",
-        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
-    }
+    json_file = os.path.join(relative_base_path, "pixivCrawl.json")
     try:
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -118,17 +118,14 @@ def read_json():
     except FileNotFoundError:
         logging.info("未找到配置文件，正在创建默认配置文件。")
         with open(json_file, 'w', encoding='utf-8') as f:
-            json.dump(default_data, f, ensure_ascii=False, indent=4)
+            out = json.dumps(default_data, indent=4, ensure_ascii=False)
+            f.write(out)
         return default_data
 
 
 # 更新json文件
-def update_json(data_id):
-    json_file = resource_path("pixivCrawl.json")
-    with open(json_file, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    data["PHPSESSID"] = data_id.replace("PHPSESSID=", "")
+def update_json(data):
+    json_file = os.path.join(relative_base_path, "pixivCrawl.json")
 
     with open(json_file, 'w', encoding='utf-8') as f:
         f.write(json.dumps(data, ensure_ascii=False, indent=4))
@@ -141,33 +138,26 @@ class PixivDownloader:
         self.app = pixiv_app
         self.type = ""  # 输入的id类型
         self.artist = ""  # 画师名字
-        self.mkdirs = ""  # 存放图片的文件夹
+        self.dirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
-        self.cookie = f'PHPSESSID={cookie_id}' if cookie_id != '' else f'PHPSESSID={cookie}'
+        self.cookie = f'PHPSESSID={cookie_id}' if cookie_id else config['cookie']
 
         # 更新cookie
-        if self.cookie != cookie and self.cookie != f'PHPSESSID={cookie}':
-            update_json(self.cookie)
+        if self.cookie and self.cookie != config['cookie']:
+            config['cookie'] = self.cookie
+            update_json(config)
 
-        self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
+        self.headers = {'Referer': "https://www.pixiv.net/",
+                        'User-agent': config['user_agent'],
+                        'Cookie': self.cookie,
+                        'Accept-Transfer-Encoding': 'identity'}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
         self.downloading_resp = []
         self.need_com_gif = {}  # 需要合成的动图
 
-        # # 配置HTTP和HTTPS连接的池和重试策略
-        # adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
-        # self.s.mount('http://', adapter)
-        # self.s.mount('https://', adapter)
-
     def download_and_save_image(self, url, save_path):
-        d_headers = {
-            'User-Agent': user_agent,
-            'Referer': 'https://www.pixiv.net/',
-            'Accept-Transfer-Encoding': 'identity'
-        }
-
-        resp = NoVPNConnect.connect(url, headers=d_headers)
+        resp = NoVPNConnect.connect(url, headers=self.headers)
         self.downloading_resp.append(resp)
 
         with open(save_path, 'rb+') as f:
@@ -183,9 +173,9 @@ class PixivDownloader:
             logging.info(f"画师名字: {self.artist}")
             if self.type == TYPE_WORKER:  # 类型是通过画师id
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-                self.mkdirs = create_directory("workers_IMG", self.artist)
+                self.dirs = create_directory("workers_IMG", self.artist)
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
-                self.mkdirs = create_directory("artworks_IMG", img_ids[0])
+                self.dirs = create_directory("artworks_IMG", img_ids[0])
 
             self.download_by_art_worker_ids(img_ids)
 
@@ -213,9 +203,9 @@ class PixivDownloader:
                     com_count += 1
                     self.app.update_progress_bar(com_count, len(self.need_com_gif))
 
-            logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
-            logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
-            os.startfile(self.mkdirs)
+            logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.dirs))}张图片~")
+            logging.info(f"存放路径：{os.path.abspath(self.dirs)}")
+            os.startfile(self.dirs)
             if if_exit_finish:
                 logging.info("程序即将自动退出~")
                 time.sleep(3)
@@ -237,7 +227,6 @@ class PixivDownloader:
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = NoVPNConnect.connect(artworks_id, headers=self.headers)
 
-        # print(requests_worker.get_content())
         soup = BeautifulSoup(requests_worker.get_content(), 'html.parser')
 
         meta_tag = str(soup.find_all('meta')[-1])
@@ -263,11 +252,6 @@ class PixivDownloader:
                 self.app.update_progress_bar(completed_count, len(futures))
                 if completed_count == len(futures):
                     break
-            # finish_count = 0
-            # for future in as_completed(futures):
-            #     future.result()
-            #     finish_count += 1
-            #     self.app.update_progress_bar(finish_count, len(img_ids))
 
     def download_by_art_worker_id(self, img_id):
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
@@ -289,7 +273,7 @@ class PixivDownloader:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
             name = os.path.basename(url)
-            file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
+            file_path = os.path.join(self.dirs, f"@{self.artist} {name}")
             touch(file_path)
 
             self.add_download_queue(url, file_path)
@@ -298,7 +282,7 @@ class PixivDownloader:
         delays = [frame['delay'] for frame in data['body']['frames']]  # 帧延迟信息
         url = data['body']['originalSrc']  # GIF图像的原始URL
         name = f"@{self.artist} {img_id}.zip"
-        file_path = os.path.join(self.mkdirs, name)
+        file_path = os.path.join(self.dirs, name)
         touch(file_path)
         self.need_com_gif[img_id] = delays
 
@@ -306,23 +290,14 @@ class PixivDownloader:
 
     def add_download_queue(self, url, file_path):
         self.numbers += 1
-        # try:
-        #     length = int(response.headers['Content-Length'])
-        #     i = 0
-        #     while i < length - self.download_size:
-        #         self.download_queue.append((url, file_path, i, i + self.download_size - 1))
-        #         i += self.download_size
-        #     self.download_queue.append((url, file_path, i, length-1))
-        # except KeyError:
-        #     # 如果无法获取文件大小，则对整个文件不分块下载
         self.download_queue.append((url, file_path))
 
     def comp_gif(self, img_id):
         delays = self.need_com_gif[img_id]
         name = f"@{self.artist} {img_id}.gif"
         o_name = f"@{self.artist} {img_id}.zip"
-        file_path = os.path.join(self.mkdirs, name)
-        o_file_name = os.path.join(self.mkdirs, o_name)
+        file_path = os.path.join(self.dirs, name)
+        o_file_name = os.path.join(self.dirs, o_name)
         with zipfile.ZipFile(o_file_name, 'r') as zip_ref:
             image_files = [f for f in zip_ref.namelist() if f.endswith(('.png', '.jpg', '.jpeg'))]
             images = [Image.open(zip_ref.open(image_file)).convert('RGBA') for image_file in image_files]
@@ -339,9 +314,9 @@ class PixivDownloader:
 
 # 通过输入框获取id下载图片
 class ThroughId(PixivDownloader):
-    def __init__(self, cookie_id, id, pixiv_app, t):
+    def __init__(self, cookie_id, art_id, pixiv_app, t):
         super().__init__(cookie_id, pixiv_app)
-        self.id = id
+        self.id = art_id
         self.type = t
 
     # 获取用户的所有作品id
@@ -486,59 +461,42 @@ class PixivApp:
         self.log_text.config(state='disabled')  # 禁用编辑功能
 
     # 是否查看画师主页
-    def isWorkers(self):
+    def is_workers(self):
         return self.b_users.get()
 
     # 是否查看插画原网站
-    def isArtworks(self):
+    def is_artworks(self):
         return self.b_artworks.get()
 
     # 提交id
     def submit_id(self, t):
         global cookie
         try:
-            if cookie == '':
-                cookie = f'{read_json()["PHPSESSID"]}'
             # 防止用户在处理期间进行交互
             self.button_artist.config(state=DISABLED)
             self.button_artwork.config(state=DISABLED)
-            cookieID = self.inputCookie_var.get()
+            cookie_id = self.inputCookie_var.get()
             if t == TYPE_WORKER:  # 画师
-                workerId = self.input_var_worker.get()
-                if workerId == '':
+                worker_id = self.input_var_worker.get()
+                if worker_id == '':
                     logging.warning('输入的画师id不能为空~~')
                     return
-                if self.isWorkers():
-                    webbrowser.open(f"https://www.pixiv.net/users/{workerId}")
-                ThroughId(cookieID, workerId, app, TYPE_WORKER).pre_download()
+                if self.is_workers():
+                    webbrowser.open(f"https://www.pixiv.net/users/{worker_id}")
+                ThroughId(cookie_id, worker_id, app, TYPE_WORKER).pre_download()
             elif t == TYPE_ARTWORKS:  # 插画
-                ImgId = self.input_var_artwork.get()
-                if ImgId == '':
+                img_id = self.input_var_artwork.get()
+                if img_id == '':
                     logging.warning('输入的插画id不能为空~~')
                     return
-                if self.isArtworks():
-                    webbrowser.open(f"https://www.pixiv.net/artworks/{ImgId}")
-                ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS).pre_download()
+                if self.is_artworks():
+                    webbrowser.open(f"https://www.pixiv.net/artworks/{img_id}")
+                ThroughId(cookie_id, img_id, app, TYPE_ARTWORKS).pre_download()
         except Exception as e:
             logging.error(e)
         finally:
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)
-
-    # 更新进度条
-    # def update_progress_bar(self, increment, total=0):
-    #     if total:  # 设置进度条最大值
-    #         self.total_progress = total
-    #         self.progress_bar["maximum"] = total
-    #         self.current_progress = 0
-    #     else:  # 更新进度条值
-    #         self.current_progress += increment
-    #     self.progress_bar["value"] = self.current_progress
-    #     self.progress_bar.update()  # 刷新UI显示
-    #
-    #     # 更新文本显示
-    #     self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
-    #     self.root.update_idletasks()
 
     def update_progress_bar(self, value, total):
         self.progress_bar["value"] = value
@@ -551,14 +509,14 @@ class PixivApp:
 
 
 if __name__ == '__main__':
-    cookie = ''
-    user_agent = read_json()["user_agent"]
+    config = read_json()
 
     root = Tk()
     app = PixivApp(root)
 
     log_init()  # 日志初始化
     check_registry_key_exists(r"pixivdownload")
+    line_cookie = ''
 
     worker_id = None
     artwork_id = None
@@ -580,8 +538,8 @@ if __name__ == '__main__':
         elif arg == "-artwork-id":
             artwork_id = args[args.index(arg) + 1]
         elif arg == "-cookie":
-            cookie = args[args.index(arg) + 1].replace("PHPSESSID=", "")
-            logging.debug(f"浏览器获取的cookie为：{cookie}")
+            line_cookie = args[args.index(arg) + 1]
+            logging.debug(f"设置cookie为：{line_cookie}")
         elif arg == "--start-now":
             is_start_now = True
         elif arg == "--exit-finish":
@@ -590,6 +548,10 @@ if __name__ == '__main__':
     if worker_id and artwork_id and is_start_now:
         logging.warning("一个一个来~")
         exit(1)
+
+    if line_cookie and line_cookie != config['cookie']:
+        config['cookie'] = line_cookie
+        update_json(config)
 
     if worker_id:
         app.input_var_worker.set(worker_id)
