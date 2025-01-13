@@ -19,6 +19,7 @@ from PIL import Image
 import winreg
 
 import NoVPNConnect
+from utils import *
 
 TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
@@ -31,12 +32,6 @@ default_data = {
     "cookie": "",
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
 }
-
-
-def thread_it(func, *type_args):
-    thread = threading.Thread(target=func, args=type_args)
-    thread.daemon = True
-    thread.start()
 
 
 # 创建文件夹
@@ -158,13 +153,14 @@ class PixivDownloader:
         self.downloading_resp = []
         self.need_com_gif = {}  # 需要合成的动图
 
+    @log_it()
     def download_and_save_image(self, url, save_path):
         resp = NoVPNConnect.connect(url, headers=self.headers)
         self.downloading_resp.append(resp)
 
         with open(save_path, 'rb+') as f:
             f.seek(0, 0)
-            f.write(resp.get_content())
+            f.write(resp.content)
 
     def download_images(self, img_ids, t):
         try:
@@ -229,7 +225,7 @@ class PixivDownloader:
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = NoVPNConnect.connect(artworks_id, headers=self.headers)
 
-        soup = BeautifulSoup(requests_worker.get_content(), 'html.parser')
+        soup = BeautifulSoup(requests_worker.content, 'html.parser')
 
         meta_tag = str(soup.find_all('meta')[-1])
         # 获取画师名字
@@ -260,7 +256,7 @@ class PixivDownloader:
 
         response = NoVPNConnect.connect(ugoira_url, headers=self.headers)
 
-        data = response.get_json()
+        data = response.json
         if data['error']:  # 是静态图
             self.download_static_images(img_id)
         else:  # 是动图
@@ -270,7 +266,7 @@ class PixivDownloader:
         response = NoVPNConnect.connect(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
 
         # 解析响应以获取所有静态图片的URL
-        static_url = response.get_json()['body']
+        static_url = response.json['body']
         for urls in static_url:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
@@ -325,7 +321,7 @@ class ThroughId(PixivDownloader):
     def get_img_ids(self):
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
         response = NoVPNConnect.connect(id_url, headers=self.headers)
-        return re.findall(r'"(\d+)":null', response.get_text())
+        return re.findall(r'"(\d+)":null', response.text)
 
     def pre_download(self):
         if self.type == TYPE_ARTWORKS:
@@ -431,7 +427,7 @@ class PixivApp:
         radiobutton2.pack(side=LEFT, padx=20)
         self.b_users.set(False)
         self.button_artist = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
-                                    bg='lavender', height=2, command=lambda: thread_it(self.submit_id, TYPE_WORKER))
+                                    bg='lavender', height=2, command=lambda: self.submit_id(TYPE_WORKER))
         self.button_artist.pack(fill='both', pady=(0, 10), anchor="n")
         label_input1 = Label(input_frame1, text='请输入画师uid:', font=('黑体', 20))
         label_input1.pack(side=LEFT)
@@ -453,7 +449,7 @@ class PixivApp:
         radiobutton4.pack(side=LEFT, padx=20)
         self.b_artworks.set(False)
         self.button_artwork = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
-                                     bg='lavender', height=2, command=lambda: thread_it(self.submit_id, TYPE_ARTWORKS))
+                                     bg='lavender', height=2, command=lambda: self.submit_id(TYPE_ARTWORKS))
         self.button_artwork.pack(fill='both', pady=(0, 0), anchor="n")
         label_input2 = Label(input_frame2, text='请输入图片uid:', font=('黑体', 20))
         label_input2.pack(side=LEFT)
@@ -499,6 +495,7 @@ class PixivApp:
         return self.b_artworks.get()
 
     # 提交id
+    @thread_it
     def submit_id(self, t):
         global cookie
         try:

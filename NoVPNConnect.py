@@ -22,7 +22,7 @@ class ConnectParent:
 
         self.nr = None
         self.url = ''
-        self.headers = {}
+        self._headers = {}
 
         self.resp_headers = None
         self.resp_content = b''
@@ -30,7 +30,7 @@ class ConnectParent:
 
     def get(self, url, headers=None):
         self.url = url
-        self.headers = headers
+        self._headers = headers
 
         self.nr = self.rev()
 
@@ -47,7 +47,8 @@ class ConnectParent:
                 return 0
         return 0
 
-    def get_headers(self):
+    @property
+    def headers(self):
         if self.nr:
             while not self.resp_headers:
                 self.resp_headers, _, _ = next(self.nr)
@@ -56,20 +57,23 @@ class ConnectParent:
             logging.warning('还未建立连接')
             return None
 
-    def get_text(self):
-        text = self.get_content()
+    @property
+    def text(self):
+        text = self.content
         if text:
             return text.decode('utf-8', 'replace')
         return None
 
-    def get_json(self):
-        text = self.get_text()
+    @property
+    def json(self):
+        text = self.text
         if text:
             logging.debug(text)
             logging.debug(json.loads(text))
             return json.loads(text)
 
-    def get_content(self):
+    @property
+    def content(self):
         if not self.nr is None:
             while not self.resp_finished:
                 self.resp_headers, self.resp_content, self.resp_finished = next(self.nr)
@@ -102,22 +106,22 @@ class ConnectParent:
             return None
 
     def rev(self):
-        if self.headers is None:
-            self.headers = {}
+        if self._headers is None:
+            self._headers = {}
         zh = {
             'Host': 'www.pixiv.net',
             'Connection': 'close'
         }
         for z in zh.keys():
-            self.headers[z] = zh.get(z)
+            self._headers[z] = zh.get(z)
         # 包装socket对象为SSL套接字
         logging.debug(f'{self.url} 开始连接')
         s2 = self.context.wrap_socket(self.conn, server_hostname=self.hostname)
 
         # 构造HTTP GET请求消息
         http_request = f'GET {self.url} HTTP/1.1\r\n'
-        for h in self.headers.keys():
-            http_request += f'{h}: {self.headers[h]}\r\n'
+        for h in self._headers.keys():
+            http_request += f'{h}: {self._headers[h]}\r\n'
         http_request += f'\r\n'
 
         try:
