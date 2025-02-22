@@ -11,13 +11,13 @@ from tkinter import *
 from tkinter.ttk import Progressbar
 
 import requests
-import urllib3
+from urllib3 import disable_warnings
 
 from FileOrDirHandler import FileHandler
 from PixivDownloader import ThroughId
 from TkinterLogHandler import TkinterLogHandler
 
-urllib3.disable_warnings()
+disable_warnings()
 
 TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
@@ -78,6 +78,9 @@ def check_registry_key_exists(key_path):
 # 应用界面框
 class PixivApp:
     def __init__(self, root_app):
+        self.downloader = None
+        self.is_stopped_btn = False
+        self.is_paused_btn = False
         self.root = root_app
         self.root.geometry('700x700+400+5')
         self.root.title('pixiv下载器')
@@ -89,6 +92,8 @@ class PixivApp:
         self.button_artist = None
         self.button_artwork = None
         self.process_text = None
+        self.btn_pause = None
+        self.btn_stop = None
         self.progress_bar = {}
         self.input_var_worker = StringVar()  # 接受画师uid
         self.input_var_artwork = StringVar()  # 接受作品uid
@@ -160,10 +165,19 @@ class PixivApp:
         process_frame = Frame(self.root)
         process_frame.pack(fill='both')
         self.progress_bar = Progressbar(process_frame, orient='horizontal', mode='determinate',
-                                        length=650, style="Custom.Horizontal.TProgressbar")
+                                        length=550, style="Custom.Horizontal.TProgressbar")
         self.progress_bar.pack(side=LEFT)
         self.process_text = Label(process_frame, text='0%')
-        self.process_text.pack(side=RIGHT)
+        self.process_text.pack(side=LEFT, padx=10)
+        self.btn_stop = Button(process_frame, text=' X ', font=('黑体', 11), background="red", foreground="white",
+                               command=lambda: thread_it(self.stop_download))
+        self.btn_stop.pack(side=RIGHT, padx=5)
+        self.btn_pause = Button(process_frame, text=' ▶ ', font=('黑体', 11),
+                                command=lambda: thread_it(self.toggle_pause))
+        self.btn_pause.pack(side=RIGHT)
+
+        self.btn_stop.config(state=DISABLED)
+        self.btn_pause.config(state=DISABLED)
 
         # 日志显示区域
         self.log_text = Text(self.root, height=10)
@@ -186,9 +200,18 @@ class PixivApp:
     # 提交id
     def submit_id(self, t):
         try:
+            # 初始化状态
+            self.is_paused_btn = False
+            self.is_stopped_btn = False
+            self.btn_pause.config(text=' ⏸ ')
+
             # 防止用户在处理期间进行交互
             self.button_artist.config(state=DISABLED)
             self.button_artwork.config(state=DISABLED)
+
+            # 解锁暂停和停止按钮
+            self.btn_stop.config(state=NORMAL)
+            self.btn_pause.config(state=NORMAL)
 
             # 读取json文件中的cookie
             cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
@@ -211,7 +234,8 @@ class PixivApp:
                     return
                 if self.isWorkers():
                     webbrowser.open(f"https://www.pixiv.net/users/{workerId}")
-                ThroughId(cookieID, workerId, app, TYPE_WORKER).pre_download()
+                self.downloader = ThroughId(cookieID, workerId, app, TYPE_WORKER)
+                self.downloader.pre_download()
             elif t == TYPE_ARTWORKS:  # 插画
                 ImgId = self.input_var_artwork.get()
                 if ImgId == '':
@@ -219,7 +243,8 @@ class PixivApp:
                     return
                 if self.isArtworks():
                     webbrowser.open(f"https://www.pixiv.net/artworks/{ImgId}")
-                ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS).pre_download()
+                self.downloader = ThroughId(cookieID, ImgId, app, TYPE_ARTWORKS)
+                self.downloader.pre_download()
             if if_exit_finish:
                 logging.info("程序即将自动退出~")
                 time.sleep(3)
@@ -231,6 +256,8 @@ class PixivApp:
         finally:
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)
+            self.btn_stop.config(state=DISABLED)
+            self.btn_pause.config(state=DISABLED)
 
     # 更新进度条
     def update_progress_bar(self, increment, total=0):
@@ -246,6 +273,33 @@ class PixivApp:
         # 更新文本显示
         self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
         self.root.update_idletasks()
+
+    # 暂停下载
+    def toggle_pause(self):
+        self.is_paused_btn = not self.is_paused_btn
+        if self.downloader:
+            if self.is_paused_btn:
+                self.btn_pause.config(text=' ▶ ')
+                self.downloader.is_paused.set()
+                self.downloader.reset_session()
+                logging.info("操作已暂停，进度条会有点延迟。。。")
+            else:
+                self.btn_pause.config(text=' ⏸ ')
+                self.downloader.is_paused.clear()
+                logging.info("操作继续")
+
+    # 停止下载
+    def stop_download(self):
+        if self.downloader:
+            self.is_stopped_btn = True
+            self.downloader.stop_all_tasks()
+            self.downloader = None
+            self.button_artist.config(state=NORMAL)
+            self.button_artwork.config(state=NORMAL)
+            self.btn_stop.config(state=DISABLED)
+            self.btn_pause.config(state=DISABLED)
+            self.update_progress_bar(0, 0)
+            logging.info("已停止下载")
 
 
 if __name__ == '__main__':

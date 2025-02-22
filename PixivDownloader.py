@@ -2,11 +2,12 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from tkinter import *
-
 import requests
+from urllib3.util.retry import Retry
 from PIL import Image
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
@@ -20,8 +21,9 @@ user_agent = FileHandler.read_json()["user_agent"]
 
 # p站图片下载器
 class PixivDownloader:
-    def __init__(self, cookie_id, pixiv_app):
+    def __init__(self, cookie_id, pixiv_app, id):
         self.app = pixiv_app
+        self.id = id
         self.type = ""  # 输入的id类型
         self.artist = ""  # 画师名字
         self.mkdirs = ""  # 存放图片的文件夹
@@ -32,13 +34,42 @@ class PixivDownloader:
         self.download_size = 1024 * 1024  # 每次下载的大小
         self.need_com_gif = {}  # 需要合成的动图
         self.s = requests.Session()
+        self.futures = []
+
+        # 暂停与终止事件
+        self.is_paused = threading.Event()
+        self.is_stopped = threading.Event()
 
         # 配置HTTP和HTTPS连接的池和重试策略
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
+        retry_strategy = Retry(
+            total=5,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=['HEAD', 'GET', 'OPTIONS']
+        )
+        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=retry_strategy)
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
+        if self.check_status() is False:
+            return
+        try:
+            if os.path.exists(save_path):
+                current_size = os.path.getsize(save_path)
+            else:
+                current_size = 0
+
+            if end_size == '':
+                end_size = 0
+
+            if current_size >= end_size:
+                self.app.update_progress_bar(1)  # 更新进度条
+                return
+        except Exception as e:
+            logging.error(f"下载图片时发生错误: {str(e)}")
+            return
+
         # 根据起始和结束位置构建HTTP请求的Range头
         byte_range = f'bytes={start_size}-{end_size}'
         d_headers = {
@@ -57,6 +88,9 @@ class PixivDownloader:
         except KeyError:
             length = 0
         logging.debug(f'start_size：{start_size}  end_size：{end_size}  length：{length}')
+
+        if self.check_status() is False:
+            return
 
         if type(start_size) == int and length > end_size - start_size + 1:
             with open(save_path, 'rb+') as f:
@@ -83,13 +117,14 @@ class PixivDownloader:
 
             if self.type == TYPE_WORKER:  # 类型是通过画师id
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-                self.mkdirs = FileHandler.create_directory("workers_IMG", self.artist)
+                self.mkdirs = FileHandler.create_directory("workers_IMG", f'{self.artist}({self.id})')
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = FileHandler.create_directory("artworks_IMG", img_ids[0])
 
             self.app.update_progress_bar(0, len(img_ids))
             self.download_by_art_worker_ids(img_ids)
             self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
+
             logging.info(f"检索结束...")
 
             if self.numbers == 0:
@@ -98,18 +133,21 @@ class PixivDownloader:
 
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
-                futures = []
                 for (url, save_path, start_size, end_size) in self.download_queue:
+                    if self.check_status() is False:
+                        break
                     logging.debug(f"{url} {save_path} {start_size} {end_size}")
                     f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
-                    futures.append(f)
-            for future in as_completed(futures):
+                    self.futures.append(f)
+            for future in as_completed(self.futures):
                 future.result()
 
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar(0, len(self.need_com_gif))
                 for img_id in self.need_com_gif:
+                    if self.check_status() is False:
+                        break
                     self.comp_gif(img_id)
                     self.app.update_progress_bar(1)
 
@@ -133,15 +171,17 @@ class PixivDownloader:
 
     def download_by_art_worker_ids(self, img_ids):
         with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
-            futures = []
             for img_id in img_ids:
+                if self.check_status() is False:
+                    break
                 f = executor.submit(self.download_by_art_worker_id, img_id)
-                futures.append(f)
-        # 等待所有下载任务完成
-        for future in as_completed(futures):
+                self.futures.append(f)
+        for future in as_completed(self.futures):
             future.result()
 
     def download_by_art_worker_id(self, img_id):
+        if self.check_status() is False:
+            return
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
         response = self.s.get(url=ugoira_url, headers=self.headers, verify=False)
         data = response.json()
@@ -152,6 +192,7 @@ class PixivDownloader:
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
+
         response = self.s.get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers,
                               verify=False)
         try:
@@ -192,6 +233,7 @@ class PixivDownloader:
             self.download_queue.append((url, file_path, i, length - 1))
         except KeyError:
             # 如果无法获取文件大小，则对整个文件不分块下载
+            logging.warning("无法获取文件大小，将使用整个文件下载。")
             self.download_queue.append((url, file_path, '', ''))
 
     def comp_gif(self, img_id):
@@ -213,19 +255,52 @@ class PixivDownloader:
             )
         os.remove(o_file_name)
 
+    def stop_all_tasks(self):
+        logging.info("正在停止所有下载任务...")
+        self.is_stopped.set()
+        # 取消所有未完成任务
+        for future in self.futures:
+            future.cancel()
+        # 关闭网络会话
+        self.s.close()
+        logging.debug("所有下载线程已强制终止")
+
+    def reset_session(self):
+        logging.info("会话已重置")
+        self.s.close()
+        self.s = requests.Session()
+        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
+        self.s.mount('http://', adapter)
+        self.s.mount('https://', adapter)
+
+    def check_status(self):
+        if self.is_stopped.is_set():
+            logging.debug("检测到停止信号，终止下载")
+            return False
+        while self.is_paused.is_set():
+            time.sleep(1)
+        return True
+
 
 # 通过输入框获取id并准备下载图片
 class ThroughId(PixivDownloader):
     def __init__(self, cookie_id, id, pixiv_app, t):
-        super().__init__(cookie_id, pixiv_app)
+        super().__init__(cookie_id, pixiv_app, id)
         self.id = id
         self.type = t
 
-    # 获取用户的所以作品id
+    # 获取用户的所有作品id
     def get_img_ids(self):
+        if self.check_status() is False:
+            return []
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
-        response = requests.get(id_url, headers=self.headers, verify=False)
-        return re.findall(r'"(\d+)":null', response.text)
+        try:
+            response = requests.get(id_url, headers=self.headers, verify=False)
+            if self.check_status() is False:
+                return []
+            return re.findall(r'"(\d+)":null', response.text)
+        except requests.exceptions.RequestException:
+            return []
 
     def pre_download(self):
         if self.type == TYPE_ARTWORKS:
