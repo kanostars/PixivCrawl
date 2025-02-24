@@ -3,6 +3,7 @@ import re
 import sys
 import time
 from logging.handlers import TimedRotatingFileHandler
+from tkinter import ttk
 from tkinter.ttk import Progressbar
 import json
 from bs4 import BeautifulSoup
@@ -25,7 +26,6 @@ TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
 
 relative_base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
-cookie = ''
 config = {}
 
 default_data = {
@@ -135,9 +135,10 @@ def update_json(data):
 
 # p站图片下载器
 class PixivDownloader:
-    def __init__(self, cookie_id, pixiv_app):
+    def __init__(self, cookie_id, art_id, pixiv_app, t):
+        self.id = art_id
+        self.type = t
         self.app = pixiv_app
-        self.type = ""  # 输入的id类型
         self.artist = ""  # 画师名字
         self.dirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
@@ -153,7 +154,6 @@ class PixivDownloader:
                         'Cookie': self.cookie,
                         'Accept-Transfer-Encoding': 'identity'}
         self.download_queue = []  # 下载队列
-        self.download_size = 1024 * 1024  # 每次下载的大小
         self.downloading_resp = []
         self.need_com_gif = {}  # 需要合成的动图
 
@@ -313,14 +313,6 @@ class PixivDownloader:
             )
         os.remove(o_file_name)
 
-
-# 通过输入框获取id下载图片
-class ThroughId(PixivDownloader):
-    def __init__(self, cookie_id, art_id, pixiv_app, t):
-        super().__init__(cookie_id, pixiv_app)
-        self.id = art_id
-        self.type = t
-
     # 获取用户的所有作品id
     def get_img_ids(self):
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
@@ -366,16 +358,51 @@ class TkinterLogHandler(logging.Handler):
 class PixivApp:
     def __init__(self, root_app):
         self.root = root_app
-        self.root.geometry('700x700+400+5')
+        self.root.geometry('700x750')
         self.root.title('pixiv下载器')
         img_path = resource_path('img\\92260993.png')
         self.root.img = PhotoImage(file=img_path)
+
+        # 组件
+        self.label_img = None
+        self.browser_frame = None
+        self.browser_label = None
+        self.browser_input = None
+        self.browser_choose = None
+        self.browser_button = None
+        self.browser_alarm = None
+        self.message_cookie = None
+        self.cookie_label = None
+        self.entry_cookie = None
+        self.input_frame1 = None
+        self.choose_frame1 = None
+        self.label1 = None
+        self.radiobutton1 = None
+        self.radiobutton2 = None
+        self.button_artist = None
+        self.label_input1 = None
+        self.entry1 = None
+        self.input_frame2 = None
+        self.choose_frame2 = None
+        self.label2 = None
+        self.radiobutton3 = None
+        self.radiobutton4 = None
+        self.button_artwork = None
+        self.label_input2 = None
+        self.entry2 = None
+        self.process_frame = None
+        self.process_text = None
+        self.btn_stop = None
+        self.btn_pause = None
+
+        # 基础变量
         self.log_text = ''
         self.total_progress = 0
         self.current_progress = 0
-        self.button_artist = None
-        self.button_artwork = None
-        self.process_text = None
+
+        # 高级变量
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
         self.progress_bar = {}
         self.input_var_worker = StringVar()  # 接受画师uid
         self.input_var_artwork = StringVar()  # 接受作品uid
@@ -389,95 +416,119 @@ class PixivApp:
         # 创建控件
         self.create_widgets()
 
+        self.pack_widgets()
+
     def create_widgets(self):
         # 图片框
-        label_img = Label(self.root, image=self.root.img, width=800, height=200)
-        label_img.pack(fill='both')
+        self.label_img = Label(self.root, image=self.root.img, width=800, height=200)
 
         # 打开浏览器
-        browser_frame = LabelFrame(self.root)
-        browser_frame.pack(fill='both', anchor='n')
-        browser_label = Label(browser_frame, text='浏览器位置：', font=('黑体', 15))
-        browser_label.pack(side=LEFT)
-        browser_input = Entry(browser_frame, textvariable=self.browser_path)
-        browser_input.pack(side=LEFT)
-        browser_choose = Button(browser_frame, pady=-10, text='...', command=self.choose_browser_path)
-        browser_choose.pack(side=LEFT)
-        browser_button = Button(browser_frame, text='打开pixiv', command=self.open_browser)
-        browser_button.pack(side=LEFT)
-        browser_alarm = Label(browser_frame, text='警告：启动浏览器前将会关闭正在运行的浏览器')
-        browser_alarm.pack(side=LEFT)
+        self.browser_frame = LabelFrame(self.root)
+        self.browser_label = Label(self.browser_frame, text='浏览器位置：', font=('黑体', 15))
+        self.browser_input = Entry(self.browser_frame, textvariable=self.browser_path)
+        self.browser_choose = Button(self.browser_frame, pady=-10, text='...', command=self.choose_browser_path)
+        self.browser_button = Button(self.browser_frame, text='打开pixiv', command=self.open_browser)
+        self.browser_alarm = Label(self.browser_frame, text='警告：启动浏览器前将会关闭正在运行的浏览器')
 
         # 键入cookie
-        message_cookie = LabelFrame(self.root)
-        message_cookie.pack(fill='both', pady=(0, 10), anchor="n")
-        cookie_label = Label(message_cookie, text='请输入PHPSESSID(可选):', font=('黑体', 15))
-        cookie_label.pack(side=LEFT, pady=5)
-        entry_cookie = Entry(message_cookie, width=95, relief='flat', textvariable=self.inputCookie_var)
-        entry_cookie.pack(side=LEFT, fill='both')
+        self.message_cookie = LabelFrame(self.root)
+        self.cookie_label = Label(self.message_cookie, text='请输入PHPSESSID(可选):', font=('黑体', 15))
+        self.entry_cookie = Entry(self.message_cookie, width=95, relief='flat', textvariable=self.inputCookie_var)
 
         # 键入画师uid
-        input_frame1 = LabelFrame(self.root)
-        input_frame1.pack(fill='both')
-        choose_frame1 = LabelFrame(self.root)
-        choose_frame1.pack(fill='both')
-        label1 = Label(choose_frame1, text='是否显示画师空间:', font=('黑体', 20))
-        label1.pack(side=LEFT)
-        radiobutton1 = Radiobutton(choose_frame1, text='是的，我要康', font=('宋体', 11), variable=self.b_users,
+        self.input_frame1 = LabelFrame(self.root)
+        self.choose_frame1 = LabelFrame(self.root)
+        self.label1 = Label(self.choose_frame1, text='是否显示画师空间:', font=('黑体', 20))
+        self.radiobutton1 = Radiobutton(self.choose_frame1, text='是的，我要康', font=('宋体', 11), variable=self.b_users,
                                    value=True, height=2)
-        radiobutton1.pack(side=LEFT, padx=20)
-        radiobutton2 = Radiobutton(choose_frame1, text='不用了，懒得点', font=('宋体', 11), variable=self.b_users,
+        self.radiobutton2 = Radiobutton(self.choose_frame1, text='不用了，懒得点', font=('宋体', 11), variable=self.b_users,
                                    value=False, height=2)
-        radiobutton2.pack(side=LEFT, padx=20)
         self.b_users.set(False)
         self.button_artist = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
                                     bg='lavender', height=2, command=lambda: self.submit_id(TYPE_WORKER))
-        self.button_artist.pack(fill='both', pady=(0, 10), anchor="n")
-        label_input1 = Label(input_frame1, text='请输入画师uid:', font=('黑体', 20))
-        label_input1.pack(side=LEFT)
-        entry1 = Entry(input_frame1, width=95, relief='flat', textvariable=self.input_var_worker)
-        entry1.pack(side=LEFT, fill='both')
+        self.label_input1 = Label(self.input_frame1, text='请输入画师uid:', font=('黑体', 20))
+        self.entry1 = Entry(self.input_frame1, width=95, relief='flat', textvariable=self.input_var_worker)
 
         # 键入作品uid
-        input_frame2 = LabelFrame(self.root)
-        input_frame2.pack(fill='both')
-        choose_frame2 = LabelFrame(self.root)
-        choose_frame2.pack(fill='both')
-        label2 = Label(choose_frame2, text='是否显示插画原网站:', font=('黑体', 20))
-        label2.pack(side=LEFT)
-        radiobutton3 = Radiobutton(choose_frame2, text='是的，我要康', font=('宋体', 11), variable=self.b_artworks,
+        self.input_frame2 = LabelFrame(self.root)
+        self.choose_frame2 = LabelFrame(self.root)
+        self.label2 = Label(self.choose_frame2, text='是否显示插画原网站:', font=('黑体', 20))
+        self.radiobutton3 = Radiobutton(self.choose_frame2, text='是的，我要康', font=('宋体', 11), variable=self.b_artworks,
                                    value=True, height=2)
-        radiobutton3.pack(side=LEFT, padx=20)
-        radiobutton4 = Radiobutton(choose_frame2, text='不用了，懒得点', font=('宋体', 11), variable=self.b_artworks,
+        self.radiobutton4 = Radiobutton(self.choose_frame2, text='不用了，懒得点', font=('宋体', 11), variable=self.b_artworks,
                                    value=False, height=2)
-        radiobutton4.pack(side=LEFT, padx=20)
         self.b_artworks.set(False)
         self.button_artwork = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound=CENTER,
                                      bg='lavender', height=2, command=lambda: self.submit_id(TYPE_ARTWORKS))
-        self.button_artwork.pack(fill='both', pady=(0, 0), anchor="n")
-        label_input2 = Label(input_frame2, text='请输入图片uid:', font=('黑体', 20))
-        label_input2.pack(side=LEFT)
-        entry2 = Entry(input_frame2, width=95, relief='flat', textvariable=self.input_var_artwork)
-        entry2.pack(side=LEFT, fill='both')
+        self.label_input2 = Label(self.input_frame2, text='请输入图片uid:', font=('黑体', 20))
+        self.entry2 = Entry(self.input_frame2, width=95, relief='flat', textvariable=self.input_var_artwork)
 
         # 进度条显示区域
-        process_frame = Frame(self.root)
-        process_frame.pack(fill='both')
-        self.progress_bar = Progressbar(process_frame, orient='horizontal', mode='determinate',
-                                        length=650, style="Custom.Horizontal.TProgressbar")
-        self.progress_bar.pack(side=LEFT)
-        self.process_text = Label(process_frame, text='0%')
-        self.process_text.pack(side=RIGHT)
+        self.process_frame = Frame(self.root)
+        self.style.configure("Custom.Horizontal.TProgressbar", troughcolor='white', background='lightblue',
+                             bordercolor='gray')
+        self.progress_bar = Progressbar(self.process_frame, orient='horizontal', mode='determinate',
+                                        length=580, style="Custom.Horizontal.TProgressbar")
+        self.progress_bar.config()
+
+        self.process_text = Label(self.process_frame, text='0%')
+
+        self.btn_stop = Button(self.process_frame, text=' X ', font=('黑体', 11), background="red", foreground="white",
+                               command=self.stop_download)
+        self.btn_pause = Button(self.process_frame, text=' ▶ ', font=('黑体', 11),
+                                command=self.toggle_pause)
+
+        self.btn_stop.config(state=DISABLED)
+        self.btn_pause.config(state=DISABLED)
 
         # 日志显示区域
         self.log_text = Text(self.root, height=10)
         self.log_text.tag_configure("red", foreground="red")
-        self.log_text.pack(fill='both', expand=True)
         self.log_text.insert('1.0',  # 插入默认日志信息
                              '欢迎使用 PIXIV 图片下载器 ！\n'
-                             '填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。\n'
+                             '填写PHPSESSID以下载更多图片，可以在浏览器开发者工具中获取值，失效时再进行填写。\n'
                              '---------------------------------------------------------------------------------------------------\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
+
+    def pack_widgets(self):
+        self.label_img.pack(fill='both')
+
+        self.browser_frame.pack(fill='both', anchor='n')
+        self.browser_label.pack(side=LEFT)
+        self.browser_input.pack(side=LEFT)
+        self.browser_choose.pack(side=LEFT)
+        self.browser_button.pack(side=LEFT)
+        self.browser_alarm.pack(side=LEFT)
+
+        self.message_cookie.pack(fill='both', pady=(0, 10), anchor="n")
+        self.cookie_label.pack(side=LEFT, pady=5)
+        self.entry_cookie.pack(side=LEFT, fill='both')
+
+        self.input_frame1.pack(fill='both')
+        self.choose_frame1.pack(fill='both')
+        self.label1.pack(side=LEFT)
+        self.radiobutton1.pack(side=LEFT, padx=20)
+        self.radiobutton2.pack(side=LEFT, padx=20)
+        self.label_input1.pack(side=LEFT)
+        self.button_artist.pack(fill='both', pady=(0, 10), anchor="n")
+        self.entry1.pack(side=LEFT, fill='both')
+
+        self.input_frame2.pack(fill='both')
+        self.choose_frame2.pack(fill='both')
+        self.label2.pack(side=LEFT)
+        self.radiobutton3.pack(side=LEFT, padx=20)
+        self.radiobutton4.pack(side=LEFT, padx=20)
+        self.label_input2.pack(side=LEFT)
+        self.button_artwork.pack(fill='both', pady=(0, 0), anchor="n")
+        self.entry2.pack(side=LEFT, fill='both')
+
+        self.process_frame.pack(fill='both')
+        self.progress_bar.pack(side=LEFT)
+        self.process_text.pack(side=LEFT)
+        self.btn_stop.pack(side=RIGHT, padx=5)
+        self.btn_pause.pack(side=RIGHT)
+
+        self.log_text.pack(fill='both', expand=True)
 
     def choose_browser_path(self):
         self.browser_path.set(filedialog.askopenfilename(title="选择浏览器", filetypes=[("exe文件", "*.exe")]))
@@ -501,11 +552,17 @@ class PixivApp:
     # 提交id
     @thread_it
     def submit_id(self, t):
-        global cookie
+        # 防止用户在处理期间进行交互
+        self.button_artist.config(state=DISABLED)
+        self.button_artwork.config(state=DISABLED)
+
+        self.btn_pause.config(text=' ⏸ ')
+
+        # 允许点击暂停和停止按钮
+        self.btn_pause.config(state=NORMAL)
+        self.btn_stop.config(state=NORMAL)
+
         try:
-            # 防止用户在处理期间进行交互
-            self.button_artist.config(state=DISABLED)
-            self.button_artwork.config(state=DISABLED)
             cookie_id = self.inputCookie_var.get()
             if t == TYPE_WORKER:  # 画师
                 input_worker_id = self.input_var_worker.get()
@@ -514,7 +571,7 @@ class PixivApp:
                     return
                 if self.is_workers():
                     webbrowser.open(f"https://www.pixiv.net/users/{input_worker_id}")
-                ThroughId(cookie_id, input_worker_id, app, TYPE_WORKER).pre_download()
+                PixivDownloader(cookie_id, input_worker_id, app, TYPE_WORKER).pre_download()
             elif t == TYPE_ARTWORKS:  # 插画
                 input_img_id = self.input_var_artwork.get()
                 if input_img_id == '':
@@ -522,12 +579,16 @@ class PixivApp:
                     return
                 if self.is_artworks():
                     webbrowser.open(f"https://www.pixiv.net/artworks/{input_img_id}")
-                ThroughId(cookie_id, input_img_id, app, TYPE_ARTWORKS).pre_download()
+                PixivDownloader(cookie_id, input_img_id, app, TYPE_ARTWORKS).pre_download()
+            print(t)
         except Exception as e:
             logging.error(e)
         finally:
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)
+
+            self.btn_pause.config(state=DISABLED)
+            self.btn_stop.config(state=DISABLED)
 
     def update_progress_bar(self, value, total):
         self.progress_bar["value"] = value
@@ -537,6 +598,14 @@ class PixivApp:
         # 更新文本显示
         self.process_text.config(text=f"{(value / total * 100):.2f}%")
         self.root.update_idletasks()
+
+    @thread_it
+    def toggle_pause(self):
+        pass
+
+    @thread_it
+    def stop_download(self):
+        pass
 
 
 if __name__ == '__main__':
