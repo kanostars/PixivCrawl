@@ -26,6 +26,9 @@ class FileHandler:
         try:
             with open(json_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
+                if 'PHPSESSID' not in data:
+                    data["PHPSESSID"] = ""
+                    FileHandler.update_json('')
                 return data
         except FileNotFoundError:
             logging.info("未找到配置文件，正在创建默认配置文件。")
