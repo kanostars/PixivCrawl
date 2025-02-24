@@ -65,6 +65,10 @@ class PixivDownloader:
                     for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+
+                if self.check_status() is False:
+                    return
+
                 self.app.update_progress_bar(1)
                 return
             except Exception as e:
@@ -79,6 +83,8 @@ class PixivDownloader:
                 current_size = 0
 
             if current_size >= end_size:
+                if self.check_status() is False:
+                    return
                 self.app.update_progress_bar(1)  # 更新进度条
                 return
         except Exception as e:
@@ -206,6 +212,9 @@ class PixivDownloader:
             self.download_static_images(img_id)
         else:  # 是动图
             self.download_gifs(data, img_id)
+
+        if self.check_status() is False:
+            return
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):

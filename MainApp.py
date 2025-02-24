@@ -284,8 +284,6 @@ class PixivApp:
         self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
         self.root.update_idletasks()
 
-        # 新增方法：更新进度条颜色
-
     def update_progress_bar_color(self, color):
         self.style.configure("Custom.Horizontal.TProgressbar", background=color)
 
@@ -297,7 +295,7 @@ class PixivApp:
                 self.btn_pause.config(text=' ▶ ')
                 self.downloader.is_paused.set()
                 self.downloader.reset_session()
-                logging.info("操作已暂停，进度条会有点延迟。。。")
+                logging.info("操作已暂停")
             else:
                 self.btn_pause.config(text=' ⏸ ')
                 self.downloader.is_paused.clear()
@@ -313,7 +311,7 @@ class PixivApp:
             self.button_artwork.config(state=NORMAL)
             self.btn_stop.config(state=DISABLED)
             self.btn_pause.config(state=DISABLED)
-            self.update_progress_bar(0, 0)
+            self.update_progress_bar(0, 1)
             logging.info("已停止下载")
 
     # 窗口关闭
