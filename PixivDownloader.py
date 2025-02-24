@@ -54,14 +54,29 @@ class PixivDownloader:
     def download_and_save_image(self, url, save_path, start_size, end_size):
         if self.check_status() is False:
             return
+
+        # 处理完整下载
+        if start_size == 0 and end_size == 0:
+            try:
+                resp = self.s.get(url, headers={'User-Agent': user_agent, 'referer': 'https://www.pixiv.net/'},
+                                  stream=True)
+                resp.raise_for_status()
+                with open(save_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                self.app.update_progress_bar(1)
+                return
+            except Exception as e:
+                logging.error(f"完整下载失败: {str(e)}")
+                return
+
+        # 处理分块下载
         try:
             if os.path.exists(save_path):
                 current_size = os.path.getsize(save_path)
             else:
                 current_size = 0
-
-            if end_size == '':
-                end_size = 0
 
             if current_size >= end_size:
                 self.app.update_progress_bar(1)  # 更新进度条
@@ -132,6 +147,8 @@ class PixivDownloader:
                 return
 
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
+            self.app.update_progress_bar_color("green")
+
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 for (url, save_path, start_size, end_size) in self.download_queue:
                     if self.check_status() is False:
@@ -225,16 +242,22 @@ class PixivDownloader:
     def add_download_queue(self, url, file_path, response):
         self.numbers += 1
         try:
-            length = int(response.headers['Content-Length'])
+            length = int(response.headers.get('Content-Length', 0))
+
+            if length == 0:
+                self.download_queue.append((url, file_path, 0, 0))
+                logging.debug(f"未获取到有效文件大小，直接下载整个文件: {url}")
+                return
+
             i = 0
-            while i < length - self.download_size:
-                self.download_queue.append((url, file_path, i, i + self.download_size - 1))
+            while i < length:
+                end = min(i + self.download_size - 1, length - 1)
+                self.download_queue.append((url, file_path, i, end))
                 i += self.download_size
-            self.download_queue.append((url, file_path, i, length - 1))
         except KeyError:
             # 如果无法获取文件大小，则对整个文件不分块下载
-            logging.warning("无法获取文件大小，将使用整个文件下载。")
-            self.download_queue.append((url, file_path, '', ''))
+            logging.debug(f"无法获取文件大小，将使用整个文件下载,url:{url}")
+            self.download_queue.append((url, file_path, 0, 0))
 
     def comp_gif(self, img_id):
         delays = self.need_com_gif[img_id]

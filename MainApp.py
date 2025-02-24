@@ -8,6 +8,7 @@ import webbrowser
 import winreg
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
+from tkinter import ttk
 from tkinter.ttk import Progressbar
 
 import requests
@@ -89,6 +90,8 @@ class PixivApp:
         self.log_text = ''
         self.total_progress = 0
         self.current_progress = 0
+        self.style = ttk.Style()
+        self.style.theme_use('clam')
         self.button_artist = None
         self.button_artwork = None
         self.process_text = None
@@ -103,6 +106,9 @@ class PixivApp:
 
         # 创建控件
         self.create_widgets()
+
+        # 绑定窗口关闭事件
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def create_widgets(self):
         # 图片框
@@ -164,9 +170,13 @@ class PixivApp:
         # 进度条显示区域
         process_frame = Frame(self.root)
         process_frame.pack(fill='both')
+
+        # 创建样式对象
+        self.style.configure("Custom.Horizontal.TProgressbar", troughcolor='white', background='lightblue', bordercolor='gray')
         self.progress_bar = Progressbar(process_frame, orient='horizontal', mode='determinate',
                                         length=550, style="Custom.Horizontal.TProgressbar")
-        self.progress_bar.pack(side=LEFT)
+        self.progress_bar.config()
+        self.progress_bar.pack(side=LEFT, padx=2)
         self.process_text = Label(process_frame, text='0%')
         self.process_text.pack(side=LEFT, padx=10)
         self.btn_stop = Button(process_frame, text=' X ', font=('黑体', 11), background="red", foreground="white",
@@ -250,7 +260,7 @@ class PixivApp:
                 time.sleep(3)
                 root.destroy()
         except requests.exceptions.ConnectTimeout:
-            logging.warning("网络请求失败，用加速器试试，提个醒，别用代理工具~")
+            logging.warning("网络请求失败，用加速器试试~")
         except requests.exceptions.RequestException as e:
             logging.warning(f"网络请求失败: {e}")
         finally:
@@ -273,6 +283,11 @@ class PixivApp:
         # 更新文本显示
         self.process_text.config(text=f"{(self.current_progress / self.total_progress * 100):.2f}%")
         self.root.update_idletasks()
+
+        # 新增方法：更新进度条颜色
+
+    def update_progress_bar_color(self, color):
+        self.style.configure("Custom.Horizontal.TProgressbar", background=color)
 
     # 暂停下载
     def toggle_pause(self):
@@ -300,6 +315,12 @@ class PixivApp:
             self.btn_pause.config(state=DISABLED)
             self.update_progress_bar(0, 0)
             logging.info("已停止下载")
+
+    # 窗口关闭
+    def on_closing(self):
+        logging.debug("窗口关闭，正在停止所有下载任务...")
+        self.stop_download()
+        self.root.destroy()
 
 
 if __name__ == '__main__':
