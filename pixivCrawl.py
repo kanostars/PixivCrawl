@@ -111,6 +111,10 @@ def read_json():
     try:
         with open(json_file, 'r', encoding='utf-8') as f:
             data = json.load(f)
+            if 'cookie' not in data:
+                data['cookie'] = ''
+            if 'user_agent' not in data:
+                data['user_agent'] = default_data['user_agent']
             return data
     except FileNotFoundError:
         logging.info("未找到配置文件，正在创建默认配置文件。")

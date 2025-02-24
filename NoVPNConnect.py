@@ -68,7 +68,6 @@ class ConnectParent:
     def json(self):
         text = self.text
         if text:
-            logging.debug(text)
             logging.debug(json.loads(text))
             return json.loads(text)
 
@@ -197,5 +196,3 @@ def open_pixiv(path):
     pram = '--start-url https://www.pixiv.net --host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4" --host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133" --test-type --ignore-certificate-errors'
     return exec_cmd(f'"{path}" {pram}')
 
-if __name__ == '__main__':
-    open_pixiv(r'C:\Users\zhizhu0\AppData\Local\Google\Chrome\Application\chrome.exe')
