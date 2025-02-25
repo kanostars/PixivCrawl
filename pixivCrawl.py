@@ -13,6 +13,7 @@ from tkinter import filedialog
 from tkinter import messagebox
 import webbrowser
 import threading
+import concurrent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import zipfile
@@ -159,6 +160,8 @@ class PixivDownloader:
 
     @log_it()
     def download_and_save_image(self, url, save_path):
+        if self.app.is_stop:
+            return
         resp = NoVPNConnect.connect(url, headers=self.headers)
         self.downloading_resp.append(resp)
 
@@ -180,6 +183,9 @@ class PixivDownloader:
                 self.dirs = create_directory("artworks_IMG", img_ids[0])
 
             self.download_by_art_worker_ids(img_ids)
+            if self.app.is_stop:
+                logging.info('用户停止下载')
+                return
 
             logging.info(f"检索结束...")
             if self.numbers == 0:
@@ -191,16 +197,32 @@ class PixivDownloader:
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 futures = []
                 executor.submit(self.download_progress_updater)
-                for (url, save_path) in self.download_queue:
-                    logging.debug(f"{url} {save_path}")
-                    f = executor.submit(self.download_and_save_image, url, save_path)
-                    futures.append(f)
+                try:
+                    for (url, save_path) in self.download_queue:
+                        logging.debug(f"{url} {save_path}")
+                        f = executor.submit(self.download_and_save_image, url, save_path)
+                        futures.append(f)
+                    done, not_done = concurrent.futures.wait(
+                        futures,
+                        return_when=concurrent.futures.FIRST_EXCEPTION
+                    )
+                    for future in done:
+                        future.result()  # 这里会立即抛出第一个异常
+                    for future in not_done:
+                        future.cancel()  # 取消未完成的任务
+                    concurrent.futures.wait(not_done)  # 等待取消完成
+                except Exception as e:
+                    executor.shutdown(wait=False)
+                    raise e
 
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar(0, len(self.need_com_gif))
                 com_count = 0
                 for img_id in self.need_com_gif:
+                    if self.app.is_stop:
+                        logging.info('用户停止下载')
+                        return
                     self.comp_gif(img_id)
                     com_count += 1
                     self.app.update_progress_bar(com_count, len(self.need_com_gif))
@@ -218,6 +240,10 @@ class PixivDownloader:
 
     def download_progress_updater(self):
         while True:
+            if self.app.is_stop:
+                for resp in self.downloading_resp:
+                    resp.stop()
+                break
             f_download = 0
             for resp in self.downloading_resp:
                 f_download += resp.get_content_progress()
@@ -247,6 +273,10 @@ class PixivDownloader:
                 futures.append(f)
             # 等待所有下载任务完成
             while True:
+                if self.app.is_stop:
+                    for future in futures:
+                        future.cancel()
+                    break
                 completed_count = 0
                 for future in futures:
                     if future.done():
@@ -399,6 +429,7 @@ class PixivApp:
         self.log_text = ''
         self.total_progress = 0
         self.current_progress = 0
+        self.is_stop = False
 
         # 高级变量
         self.style = ttk.Style()
@@ -580,10 +611,11 @@ class PixivApp:
                 if self.is_artworks():
                     webbrowser.open(f"https://www.pixiv.net/artworks/{input_img_id}")
                 PixivDownloader(cookie_id, input_img_id, app, TYPE_ARTWORKS).pre_download()
-            print(t)
         except Exception as e:
             logging.error(e)
         finally:
+            self.is_stop = False
+
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)
 
@@ -605,7 +637,10 @@ class PixivApp:
 
     @thread_it
     def stop_download(self):
-        pass
+        logging.info('正在停止下载')
+
+        self.is_stop = True
+
 
 
 if __name__ == '__main__':
