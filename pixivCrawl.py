@@ -162,6 +162,8 @@ class PixivDownloader:
     def download_and_save_image(self, url, save_path):
         if self.app.is_stop:
             return
+        while self.app.is_paused:
+            time.sleep(0.5)
         resp = NoVPNConnect.connect(url, headers=self.headers)
         self.downloading_resp.append(resp)
 
@@ -186,6 +188,8 @@ class PixivDownloader:
             if self.app.is_stop:
                 logging.info('用户停止下载')
                 return
+            while self.app.is_paused:
+                time.sleep(0.5)
 
             logging.info(f"检索结束...")
             if self.numbers == 0:
@@ -223,6 +227,9 @@ class PixivDownloader:
                     if self.app.is_stop:
                         logging.info('用户停止下载')
                         return
+                    if self.app.is_paused:
+                        time.sleep(0.5)
+                        continue
                     self.comp_gif(img_id)
                     com_count += 1
                     self.app.update_progress_bar(com_count, len(self.need_com_gif))
@@ -244,6 +251,9 @@ class PixivDownloader:
                 for resp in self.downloading_resp:
                     resp.stop()
                 break
+            if self.app.is_paused:
+                time.sleep(0.5)
+                continue
             f_download = 0
             for resp in self.downloading_resp:
                 f_download += resp.get_content_progress()
@@ -277,6 +287,9 @@ class PixivDownloader:
                     for future in futures:
                         future.cancel()
                     break
+                if self.app.is_paused:
+                    time.sleep(0.5)
+                    continue
                 completed_count = 0
                 for future in futures:
                     if future.done():
@@ -430,6 +443,7 @@ class PixivApp:
         self.total_progress = 0
         self.current_progress = 0
         self.is_stop = False
+        self.is_paused = False
 
         # 高级变量
         self.style = ttk.Style()
@@ -615,6 +629,8 @@ class PixivApp:
             logging.error(e)
         finally:
             self.is_stop = False
+            self.is_paused = False
+            self.btn_pause.config(text=' ⏸ ')
 
             self.button_artist.config(state=NORMAL)
             self.button_artwork.config(state=NORMAL)
@@ -633,7 +649,12 @@ class PixivApp:
 
     @thread_it
     def toggle_pause(self):
-        pass
+        if self.is_paused:
+            self.is_paused = False
+            self.btn_pause.config(text=' ⏸ ')
+        else:
+            self.is_paused = True
+            self.btn_pause.config(text=' ▶ ')
 
     @thread_it
     def stop_download(self):

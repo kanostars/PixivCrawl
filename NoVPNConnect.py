@@ -28,6 +28,7 @@ class ConnectParent:
         self.resp_content = b''
         self.resp_finished = False
         self.is_stopped = False
+        self.is_paused = False
 
     def get(self, url, headers=None):
         self.url = url
@@ -105,6 +106,12 @@ class ConnectParent:
         else:
             return None
 
+    def pause(self):
+        self.is_paused = True
+
+    def resume(self):
+        self.is_paused = False
+
     def stop(self):
         self.is_stopped = True
         self.conn.close()
@@ -139,8 +146,12 @@ class ConnectParent:
             while True:
                 if self.is_stopped:
                     logging.debug(f'{self.url} 连接已被终止')
-                    print('连接终止')
+                    s2.close()
                     return
+                if self.is_paused:
+                    time.sleep(0.5)
+                    yield headers, response_data, False
+                    continue
                 chunk = s2.recv(4096)
                 if not chunk:
                     break
