@@ -127,7 +127,12 @@ class ConnectParent:
             self._headers[z] = zh.get(z)
         # 包装socket对象为SSL套接字
         logging.debug(f'{self.url} 开始连接')
-        s2 = self.context.wrap_socket(self.conn, server_hostname=self.hostname)
+        logging.debug(self.hostname)
+        s2 = self.context.wrap_socket(self.conn,
+                                      server_hostname=self.hostname,
+                                      do_handshake_on_connect=False)
+        s2.do_handshake()
+        logging.debug(f'{self.url} 连接成功')
 
         # 构造HTTP GET请求消息
         http_request = f'GET {self.url} HTTP/1.1\r\n'
@@ -170,6 +175,7 @@ class ConnectParent:
                         has_header = True
 
                         logging.debug(f'{self.url} 获取到请求头 {headers}')
+                logging.debug(response_data)
                 yield headers, response_data, False
             while True:
                 yield headers, response_data, True
@@ -182,7 +188,7 @@ class ConnectParent:
 class ConnectMain(ConnectParent):
     def __init__(self):
         super().__init__()
-        self.conn = socket.create_connection(('pixivision.net', 443), 10)
+        self.conn = socket.create_connection(('210.140.139.155', 443), 10)
 
         self.hostname = '210.140.139.155'
 
