@@ -175,7 +175,6 @@ class ConnectParent:
                         has_header = True
 
                         logging.debug(f'{self.url} 获取到请求头 {headers}')
-                logging.debug(response_data)
                 yield headers, response_data, False
             while True:
                 yield headers, response_data, True
