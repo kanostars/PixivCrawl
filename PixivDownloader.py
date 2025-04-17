@@ -9,7 +9,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 from urllib3.util.retry import Retry
 from PIL import Image
-from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 
 from FileOrDirHandler import FileHandler
@@ -17,6 +16,13 @@ from FileOrDirHandler import FileHandler
 TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
 user_agent = FileHandler.read_json()["user_agent"]
+languages = {
+    "zh_tw": "的插畫",
+    "zh": "的插画",
+    "ja": "のイラスト",
+    "ko": "의 일러스트"
+}
+
 
 
 # p站图片下载器
@@ -167,6 +173,7 @@ class PixivDownloader:
 
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
+                self.app.update_progress_bar_color("yellow")
                 self.app.update_progress_bar(0, len(self.need_com_gif))
                 for img_id in self.need_com_gif:
                     if self.check_status() is False:
@@ -177,18 +184,25 @@ class PixivDownloader:
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             os.startfile(self.mkdirs)
-        except IndexError:
+        except IndexError as e:
             logging.warning("未找到该画师,请重新输入~")
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = self.s.get(artworks_id, headers=self.headers, verify=False)
-        soup = BeautifulSoup(requests_worker.text, 'html.parser')
-        meta_tag = str(soup.find_all('meta')[-1])
-        # 获取画师名字
-        worker_url = re.findall(f'"userName":"(.*?)"', meta_tag)
-        if worker_url:
-            return re.sub(r'[/\\| ]', '_', worker_url[0])
+        retxt = requests_worker.text
+        logging.debug(requests_worker.text)
+        # 获取浏览器语言
+        lang = re.findall(r' lang="(.*?)"', retxt)
+        if lang:
+            lang = lang[0]
+        else:
+            return None
+        if lang in languages:
+            # 返回画师名字
+            return re.findall(f'- (.*?){languages[lang]}', retxt)[0]
+        else:
+            logging.info("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
         logging.warning("未找到该画师,请重新输入~")
         return None
 
