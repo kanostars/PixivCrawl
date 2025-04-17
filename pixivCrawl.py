@@ -29,6 +29,13 @@ TYPE_ARTWORKS = "artWork"  # 类型是插画
 relative_base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
 config = {}
 
+languages = {
+    "zh_tw": "的插畫",
+    "zh": "的插画",
+    "ja": "のイラスト",
+    "ko": "의 일러스트"
+}
+
 default_data = {
     "cookie": "",
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
@@ -264,14 +271,19 @@ class PixivDownloader:
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = NoVPNConnect.connect(artworks_id, headers=self.headers)
-
-        soup = BeautifulSoup(requests_worker.content, 'html.parser')
-
-        meta_tag = str(soup.find_all('meta')[-1])
-        # 获取画师名字
-        worker_url = re.findall(f'"userName":"(.*?)"', meta_tag)
-        if worker_url:
-            return re.sub(r'[/\\| ]', '_', worker_url[0])
+        re_txt = requests_worker.text
+        logging.debug(requests_worker.text)
+        # 获取浏览器语言
+        lang = re.findall(r' lang="(.*?)"', re_txt)
+        if lang:
+            lang = lang[0]
+        else:
+            return None
+        if lang in languages:
+            # 返回画师名字
+            return re.findall(f'- (.*?){languages[lang]}', re_txt)[0]
+        else:
+            logging.info("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
         logging.warning("未找到该画师,请重新输入~")
         return None
 

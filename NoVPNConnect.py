@@ -23,6 +23,8 @@ class ConnectParent:
         self.nr = None
         self.url = ''
         self._headers = {}
+        self.cookies = {}
+        self.status_code = 0
 
         self.resp_headers = None
         self.resp_content = b''
@@ -72,6 +74,7 @@ class ConnectParent:
         if text:
             logging.debug(json.loads(text))
             return json.loads(text)
+        return None
 
     @property
     def content(self):
@@ -168,13 +171,27 @@ class ConnectParent:
                         response_data = response_data[header_end_index + 4:]
                         hs = headers.split('\r\n')
                         headers = {}
+                        status_code = hs[0].split(' ')[1]
+                        self.status_code = int(status_code)
                         for h in hs:
                             t = h.split(': ')
                             if len(t) == 2:
-                                headers[t[0]] = t[1]
+                                # todo cookie暂时放在字典里
+                                if t[0] == 'Set-Cookie':
+                                    cks = t[1].split(';')
+                                    # for ck in cks:
+                                    ck = cks[0].strip()
+                                    if '=' in ck:
+                                        ck = ck.split('=')
+                                        self.cookies[ck[0]] = ck[1]
+                                if t[0] in headers:
+                                    headers[t[0]] += ', ' + t[1]
+                                else:
+                                    headers[t[0]] = t[1]
                         has_header = True
 
-                        logging.debug(f'{self.url} 获取到请求头 {headers}')
+                        logging.debug(f'{self.url} 状态代码：{self.status_code}')
+                        logging.debug(f'{self.url} Cookies:{self.cookies}')
                 yield headers, response_data, False
             while True:
                 yield headers, response_data, True
@@ -205,6 +222,8 @@ def connect(url, headers=None):
         return ConnectMain().get(url, headers)
     if 'pximg.net' in url:
         return ConnectImg().get(url, headers)
+    return None
+
 
 def exec_cmd(cmd):
     return subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
