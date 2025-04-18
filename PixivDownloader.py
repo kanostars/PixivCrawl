@@ -13,8 +13,8 @@ from requests.adapters import HTTPAdapter
 
 from FileOrDirHandler import FileHandler
 
-TYPE_WORKER = "artist"  # 类型是画师
-TYPE_ARTWORKS = "artWork"  # 类型是插画
+TYPE_WORKER = "users"  # 类型是画师
+TYPE_ARTWORKS = "artworks"  # 类型是插画
 user_agent = FileHandler.read_json()["user_agent"]
 languages = {
     "zh_tw": "的插畫",
@@ -22,8 +22,6 @@ languages = {
     "ja": "のイラスト",
     "ko": "의 일러스트"
 }
-
-
 
 # p站图片下载器
 class PixivDownloader:
@@ -202,7 +200,7 @@ class PixivDownloader:
             # 返回画师名字
             return re.findall(f'- (.*?){languages[lang]}', retxt)[0]
         else:
-            logging.info("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
+            logging.warning("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
         logging.warning("未找到该画师,请重新输入~")
         return None
 
