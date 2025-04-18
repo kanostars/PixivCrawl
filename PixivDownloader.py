@@ -16,6 +16,7 @@ from FileOrDirHandler import FileHandler
 TYPE_WORKER = "users"  # 类型是画师
 TYPE_ARTWORKS = "artworks"  # 类型是插画
 user_agent = FileHandler.read_json()["user_agent"]
+cookies = f'PHPSESSID={FileHandler.read_json()["PHPSESSID"]}'
 languages = {
     "zh_tw": "的插畫",
     "zh": "的插画",
@@ -23,16 +24,32 @@ languages = {
     "ko": "의 일러스트"
 }
 
+def get_username():
+    try:
+        headers = {
+            'cookie': cookies,
+            'referer': 'https://www.pixiv.net/',
+            'user-agent': user_agent
+        }
+        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False)
+        username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', res.text).group(1)
+        return username
+    except Exception as e:
+        logging.debug(f"获取用户名失败: {str(e)}")
+        logging.warning(f"获取用户名失败,请重新登录")
+        return None
+
+
 # p站图片下载器
 class PixivDownloader:
-    def __init__(self, cookie_id, pixiv_app, id):
+    def __init__(self, pixiv_app, id):
         self.app = pixiv_app
         self.id = id
         self.type = ""  # 输入的id类型
         self.artist = ""  # 画师名字
         self.mkdirs = ""  # 存放图片的文件夹
         self.numbers = 0  # 图片数量
-        self.cookie = f'PHPSESSID={cookie_id}'
+        self.cookie = cookies
         self.headers = {'referer': "https://www.pixiv.net/", 'user-agent': user_agent, 'cookie': self.cookie}
         self.download_queue = []  # 下载队列
         self.download_size = 1024 * 1024  # 每次下载的大小
@@ -189,7 +206,6 @@ class PixivDownloader:
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = self.s.get(artworks_id, headers=self.headers, verify=False)
         retxt = requests_worker.text
-        logging.debug(requests_worker.text)
         # 获取浏览器语言
         lang = re.findall(r' lang="(.*?)"', retxt)
         if lang:
@@ -328,8 +344,8 @@ class PixivDownloader:
 
 # 通过输入框获取id并准备下载图片
 class ThroughId(PixivDownloader):
-    def __init__(self, cookie_id, id, pixiv_app, t):
-        super().__init__(cookie_id, pixiv_app, id)
+    def __init__(self, id, pixiv_app, t):
+        super().__init__(pixiv_app, id)
         self.id = id
         self.type = t
 

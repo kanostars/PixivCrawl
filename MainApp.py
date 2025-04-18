@@ -7,16 +7,25 @@ import threading
 import time
 import webbrowser
 import winreg
+import re
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
 from tkinter import ttk
 from tkinter.ttk import Progressbar
+
 import requests
 from urllib3 import disable_warnings
 
 from FileOrDirHandler import FileHandler
-from PixivDownloader import ThroughId
+from PixivDownloader import ThroughId, get_username
 from TkinterLogHandler import TkinterLogHandler
+
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
 
 disable_warnings()
 
@@ -26,7 +35,8 @@ type_config = {
     0: TYPE_WORKER,  # 画师配置
     1: TYPE_ARTWORKS  # 插画配置
 }
-cookie = ''
+
+cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 
 def thread_it(func, *args):
@@ -64,7 +74,6 @@ def check_registry_key_exists(key_path):
     if not ctypes.windll.shell32.IsUserAnAdmin():
         logging.warning("请以管理员权限运行本程序")
         return
-
     try:
         # 尝试打开注册表键
         root_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
@@ -88,6 +97,7 @@ def check_registry_key_exists(key_path):
 class PixivApp:
     def __init__(self, root_app):
         self.downloader = None
+        self.isLogin = False
         self.is_stopped_btn = False
         self.is_paused_btn = False
         self.root = root_app
@@ -104,16 +114,20 @@ class PixivApp:
         self.process_text = None
         self.btn_pause = None
         self.btn_stop = None
+        self.cookie = None
+        self.username = None
         self.progress_bar = {}
         self.input_var_UID = StringVar()  # 接受链接/uid
         self.input_var_UID.trace("w", self.update_content)
-        self.inputCookie_var = StringVar()  # 接受登陆后的cookie
         self.space_visit = BooleanVar()  # 是否查看画师主页
         self.type = IntVar()  # 画师类型  0: 画师  1: 插画
-
+        self.welcome = StringVar()  # 欢迎语
+        self.login_btn_text = StringVar()
+        self.login_btn_text.set("登录")
+        self.welcome.set("欢迎，登录可以下载更多图片！")
         # 创建控件
         self.create_widgets()
-
+        self.isLogin = self.is_login_by_name()
         # 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -122,42 +136,44 @@ class PixivApp:
         label_img = Label(self.root, image=self.root.img, width=800, height=200)
         label_img.pack(fill='both')
 
-        # 键入cookie
-        message_cookie_frame = LabelFrame(self.root)
-        message_cookie_frame.pack(fill='both', pady=(0, 5), anchor="n")
-        cookie_label = Label(message_cookie_frame, text='请输入PHPSESSID(可选):', font=('黑体', 15))
-        cookie_label.pack(side='left', pady=5)
-        entry_cookie = Entry(message_cookie_frame, width=95, relief='flat', textvariable=self.inputCookie_var)
-        entry_cookie.pack(side='left', fill='both')
+        # 登录
+        login_frame = LabelFrame(self.root)
+        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=('黑体', 15), command=self.login_or_out,
+                           width=40, relief='groove',
+                           compound='center')
+        login_welcome = Label(login_frame, textvariable=self.welcome, font=('黑体', 12))
+        login_welcome.pack(side='left', padx=5)
+        login_btn.pack(side='right')
+        login_frame.pack(fill='both', pady=(0, 5))
 
         # 键入uid
         input_frame = LabelFrame(self.root)
-        input_frame.pack(fill='both', pady=(0, 5))
-
         label_input = Label(input_frame, text='请输入链接/UID:', font=('黑体', 18))
-        label_input.pack(side='left')
         entry = Entry(input_frame, width=40, relief='flat', textvariable=self.input_var_UID)
-        entry.pack(side='left', fill='both')
-
-        type_btn = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=1, variable=self.type, value=0)
-        type_btn.pack(side='right', padx=5)
-        type_btn = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=1, variable=self.type, value=1)
-        type_btn.pack(side='right', padx=5)
+        type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=1, variable=self.type, value=0)
+        type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=1, variable=self.type, value=1)
         label_type = Label(input_frame, text='作品类型:', font=('黑体', 12))
+        type_btn2.pack(side='right', padx=5)
+        type_btn1.pack(side='right', padx=5)
+        label_input.pack(side='left')
+        entry.pack(side='left', fill='both')
         label_type.pack(side='right', padx=10)
+        input_frame.pack(fill='both', pady=(0, 5))
 
         # 跳转空间
         choose_frame = LabelFrame(self.root)
-        choose_frame.pack(fill='both', pady=(0, 5))
         label = Label(choose_frame, text='要去空间看看吗？', font=('黑体', 12))
-        label.pack(side='left')
-        space_btn = Radiobutton(choose_frame, text='是的，我要康', font=('宋体', 11), variable=self.space_visit,
-                                value=True, height=2)
-        space_btn.pack(side='left', padx=20)
-        space_btn = Radiobutton(choose_frame, text='不用了，懒得点', font=('宋体', 11), variable=self.space_visit,
-                                value=False, height=2)
-        space_btn.pack(side='left', padx=20)
+
+        space_btn1 = Radiobutton(choose_frame, text='是的，我要康', font=('宋体', 11), variable=self.space_visit,
+                                 value=True, height=2)
+        space_btn2 = Radiobutton(choose_frame, text='不用了，懒得点', font=('宋体', 11), variable=self.space_visit,
+                                 value=False, height=2)
         self.space_visit.set(False)
+        label.pack(side='left')
+        space_btn2.pack(side='left', padx=20)
+        space_btn1.pack(side='left', padx=20)
+
+        choose_frame.pack(fill='both', pady=(0, 5))
 
         # 提交按钮
         self.button_submit = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound='center',
@@ -166,36 +182,84 @@ class PixivApp:
 
         # 进度条显示区域
         process_frame = Frame(self.root)
-        process_frame.pack(fill='both')
-
         # 创建样式对象
         self.style.configure("Custom.Horizontal.TProgressbar", troughcolor='white', background='lightblue',
                              bordercolor='gray')
         self.progress_bar = Progressbar(process_frame, orient='horizontal', mode='determinate',
                                         length=550, style="Custom.Horizontal.TProgressbar")
         self.progress_bar.config()
-        self.progress_bar.pack(side='left', padx=2)
         self.process_text = Label(process_frame, text='0%')
-        self.process_text.pack(side='left', padx=10)
         self.btn_stop = Button(process_frame, text=' X ', font=('黑体', 11), background="red", foreground="white",
                                command=lambda: thread_it(self.stop_download))
-        self.btn_stop.pack(side='right', padx=5)
         self.btn_pause = Button(process_frame, text=' ▶ ', font=('黑体', 11),
                                 command=lambda: thread_it(self.toggle_pause))
-        self.btn_pause.pack(side='right')
-
         self.btn_stop.config(state='disabled')
         self.btn_pause.config(state='disabled')
+        process_frame.pack(fill='both')
+        self.btn_pause.pack(side='right')
+        self.btn_stop.pack(side='right', padx=5)
+        self.process_text.pack(side='left', padx=10)
+        self.progress_bar.pack(side='left', padx=2)
 
         # 日志显示区域
         self.log_text = Text(self.root, height=10)
         self.log_text.tag_configure("red", foreground="red")
-        self.log_text.pack(fill='both', expand=True)
         self.log_text.insert('1.0',  # 插入默认日志信息
                              '欢迎使用 PIXIV 图片下载器 ！\n'
-                             '填写PHPSESSID以下载更多图片，可以再浏览器开发者工具中获取值，失效时再进行填写。\n'
+                             '登录以下载更多图片，失效时再重新登录。\n'
                              '---------------------------------------------------------------------------------------------------\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
+        self.log_text.pack(fill='both', expand=True)
+
+    # 登录
+    def login_or_out(self):
+        try:
+            global cookie_json
+            if not self.isLogin:
+                service = Service(executable_path=ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service)
+                driver.get('https://accounts.pixiv.net/login?lang=zh&source=pc&view_type=page')
+                WebDriverWait(driver, 300).until(
+                    EC.url_contains("www.pixiv.net")  # 检查目标URL包含的关键字
+                )
+                # 获取最终跳转后的URL
+                for cookie in driver.get_cookies():
+                    if cookie['name'] == 'PHPSESSID':
+                        self.cookie = cookie['value']
+                        logging.debug(f'用户登录获得的cookie: {self.cookie}')
+                        div_text = driver.find_element(By.CSS_SELECTOR, 'div.jePfsr').get_attribute('outerHTML')
+                        self.username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', div_text).group(1)
+                        logging.info(f"用户{self.username}已登录~")
+                        self.welcome.set(f'你好，{self.username}！')
+                        self.login_btn_text.set("退出登录")
+                        self.isLogin = True
+                        driver.close()
+                        break
+                cookie_temp = self.cookie if self.cookie else cookie_json
+
+                # 更新cookie
+                if cookie_temp != cookie_json and cookie_temp is not None:
+                    FileHandler.update_json(cookie_temp)
+                    logging.debug(f"PHPSESSID已更新为：{cookie_temp}")
+
+            else:
+                logging.info(f"已成功退出")
+                self.isLogin = False
+                FileHandler.update_json("")
+                self.login_btn_text.set("登录")
+                self.welcome.set("欢迎，登录可以下载更多图片！")
+
+
+        except Exception as e:
+            logging.debug(f"登录失败，错误信息：{e}")
+            logging.info("已取消登录")
+
+    def is_login_by_name(self):
+        if get_username():
+            self.login_btn_text.set("退出登录")
+            self.welcome.set(f"你好，{get_username()}！")
+            return True
+        return False
 
     # 是否查看网页
     def is_visit_space(self):
@@ -216,20 +280,6 @@ class PixivApp:
             self.btn_stop.config(state=NORMAL)
             self.btn_pause.config(state=NORMAL)
 
-            # 读取json文件中的cookie
-            cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
-            # todo 以后要改
-            cookieID = self.inputCookie_var.get() if self.inputCookie_var.get() else cookie_json
-            if cookie:
-                cookieID = cookie
-
-            # 更新cookie
-            if cookieID != cookie_json and cookieID is not None:
-                FileHandler.update_json(cookieID)
-                logging.debug(f"PHPSESSID已更新为：{cookieID}")
-
-            logging.debug(f'使用的PHPSESSID为：{cookieID}')
-
             input_UID = self.input_var_UID.get()
             if input_UID == '':
                 logging.warning('输入的画师id不能为空~~')
@@ -243,7 +293,7 @@ class PixivApp:
             if self.is_visit_space():
                 webbrowser.open(f"https://www.pixiv.net/{type}/{input_UID}")
 
-            self.downloader = ThroughId(cookieID, input_UID, app, type)
+            self.downloader = ThroughId(input_UID, app, type)
             self.downloader.pre_download()
 
             if if_exit_finish:
@@ -365,15 +415,19 @@ if __name__ == '__main__':
         logging.debug(f"浏览器获取的作品ID为：{artwork_id}")
     elif args.cookie:
         args.cookie = args.cookie.replace("PHPSESSID=", "")
-        logging.debug(f"浏览器获取的cookie为：{cookie}")
+        logging.debug(f"浏览器获取的cookie为：{args.cookie}")
 
     is_start_now = args.start_now
     if_exit_finish = args.exit_finish
 
     if args.worker_id or args.artwork_id:
         target_id = args.worker_id if args.worker_id else args.artwork_id
-        app.type.set(0 if args.worker_id else 1)
+        app.type.set(0 if args.worker_id else 1)  # 切换类型
         app.input_var_UID.set(target_id)
+        # 更新cookie
+        if args.cookie != cookie_json and args.cookie is not None:
+            FileHandler.update_json(args.cookie)
+            logging.debug(f"PHPSESSID已更新为：{args.cookie}")
 
         if is_start_now:
             app.button_submit.invoke()
