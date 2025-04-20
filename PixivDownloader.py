@@ -18,10 +18,10 @@ TYPE_ARTWORKS = "artworks"  # 类型是插画
 user_agent = FileHandler.read_json()["user_agent"]
 cookies = f'PHPSESSID={FileHandler.read_json()["PHPSESSID"]}'
 languages = {
-    "zh_tw": "的插畫",
-    "zh": "的插画",
-    "ja": "のイラスト",
-    "ko": "의 일러스트"
+    "zh_tw": ["的插畫", "的漫畫"],
+    "zh": ["的插画", "的漫画"],
+    "ja": ["のイラスト", "のマンガ"],
+    "ko": ["의 일러스트", "의 만화"]
 }
 
 def get_username():
@@ -31,7 +31,7 @@ def get_username():
             'referer': 'https://www.pixiv.net/',
             'user-agent': user_agent
         }
-        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False, timeout=(3, 3))
+        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False, timeout=5)
         username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', res.text).group(1)
         return username
     except Exception as e:
@@ -209,18 +209,21 @@ class PixivDownloader:
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
         requests_worker = self.s.get(artworks_id, headers=self.headers, verify=False)
-        retxt = requests_worker.text
+        re_txt = requests_worker.text
         # 获取浏览器语言
-        lang = re.findall(r' lang="(.*?)"', retxt)
+        lang = re.findall(r' lang="(.*?)"', re_txt)
         if lang:
             lang = lang[0]
         else:
             return None
         if lang in languages:
             # 返回画师名字
-            return re.findall(f'- (.*?){languages[lang]}', retxt)[0]
+            for l in languages[lang]:
+                name = re.search(f'- (.*?){l}', re_txt)
+                if name:
+                    return name.group(1)
         else:
-            logging.warning("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
+            logging.info("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
         logging.warning("未找到该画师,请重新输入~")
         return None
 
