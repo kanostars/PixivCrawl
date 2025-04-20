@@ -31,12 +31,16 @@ def get_username():
             'referer': 'https://www.pixiv.net/',
             'user-agent': user_agent
         }
-        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False)
+        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False, timeout=(3, 3))
         username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', res.text).group(1)
         return username
     except Exception as e:
         logging.debug(f"获取用户名失败: {str(e)}")
         logging.warning(f"获取用户名失败,请重新登录")
+        return None
+    except requests.exceptions.Timeout:
+        logging.debug("请求超时，请检查网络连接")
+        logging.warning("获取用户名超时，请确认网络正常后重试")
         return None
 
 
