@@ -1,2 +1,4 @@
 beautifulsoup4~=4.12.3
 pillow~=11.0.0
+selenium~=4.31.0
+webdrivermanager_cn~=2.4.0
