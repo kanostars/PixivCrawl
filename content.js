@@ -1,14 +1,15 @@
 // ==UserScript==
-// @name         Pixiv Download1
+// @name         Pixiv Download
 // @namespace    http://tampermonkey.net/
-// @version      2024-11-01
-// @description  try to take over the world!
-// @author       You
+// @version      2.4.2
+// @description  Pixiv下载脚本器，批量下载图片
+// @author       kanostar
 // @match        *://*/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=tampermonkey.net.cn
 // @grant        GM_cookie
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @license      GPL
 // ==/UserScript==
 let session = "";
 
@@ -65,8 +66,8 @@ function create_window() {
         let cookie = "/-cookie/" + session.replaceAll(" ", "").trim() + "/";
 
         const baseUri = uri.split("/").pop();
-        const prefix = isArtwork ? "-artwork-id" : "-worker-id";
-        const url = `pixivdownload://${prefix}/${baseUri}${cookie}--start-now/--exit-finish`;
+        const prefix = isArtwork ? "-a" : "-w";
+        const url = `pixivdownload://${prefix}/${baseUri}${cookie}-sn/-ef`;
 
         window.open(url);
 

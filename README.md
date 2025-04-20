@@ -42,10 +42,12 @@ pixivCrawl.exe -a "129270666" -cookie " " -sn -ef
 - `-a` | `--artworkID`  作品ID
 
 **注意-w 和 -a 只能二选一**
+
+可选项部分：
 - `-cookie` | `--cookie` 登录cookie
 - `-sn` | start_now 是否立刻下载
 - `-ef` | exist_finish 下载结束后是否自动退出
-可选项部分：
+
 
 ## ~~3. 使用浏览器插件运行(已废除)~~
 
