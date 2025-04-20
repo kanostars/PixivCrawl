@@ -375,17 +375,15 @@ if __name__ == '__main__':
     log_init()  # 日志初始化
     check_registry_key_exists(r"pixivdownload")
 
-    worker_id = None
-    artwork_id = None
     is_start_now = False
     if_exit_finish = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-worker-id', help='画师ID')
-    parser.add_argument('-artwork-id', help='作品ID')
+    parser.add_argument('-w', help='画师ID')
+    parser.add_argument('-a', help='作品ID')
     parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('--start-now', action='store_true', help='是否立即开始下载')
-    parser.add_argument('--exit-finish', action='store_true', help='程序退出时自动结束')
+    parser.add_argument('-sn', action='store_true', help='是否立即开始下载')
+    parser.add_argument('-ef', action='store_true', help='程序结束时自动退出')
     parser.add_argument('--url', help='链接')
 
     args = parser.parse_args()
@@ -393,36 +391,36 @@ if __name__ == '__main__':
     if args.url:
         contents = args.url.split('/')
         for i in range(len(contents)):
-            if contents[i] == '-worker-id':
-                args.worker_id = contents[i + 1]
-            elif contents[i] == '-artwork-id':
-                args.artwork_id = contents[i + 1]
+            if contents[i] == '-w':
+                args.w = contents[i + 1]
+            elif contents[i] == '-a':
+                args.a = contents[i + 1]
             elif contents[i] == '-cookie':
                 args.cookie = contents[i + 1]
-            elif contents[i] == '--start-now':
-                args.start_now = True
-            elif contents[i] == '--exit-finish':
-                args.exit_finish = True
+            elif contents[i] == '-sn':
+                args.sn = True
+            elif contents[i] == '-ef':
+                args.ef = True
 
-    if args.artwork_id and args.worker_id:
+    if args.a and args.w:
         logging.warning("一个一个来~")
         exit(1)
 
     # 命令行参数解析
-    if args.worker_id:
-        logging.debug(f"浏览器获取的画师ID为：{worker_id}")
-    elif args.artwork_id:
-        logging.debug(f"浏览器获取的作品ID为：{artwork_id}")
+    if args.w:
+        logging.debug(f"浏览器获取的画师ID为：{args.w}")
+    elif args.a:
+        logging.debug(f"浏览器获取的作品ID为：{args.a}")
     elif args.cookie:
         args.cookie = args.cookie.replace("PHPSESSID=", "")
         logging.debug(f"浏览器获取的cookie为：{args.cookie}")
 
-    is_start_now = args.start_now
-    if_exit_finish = args.exit_finish
+    is_start_now = args.sn
+    if_exit_finish = args.ef
 
-    if args.worker_id or args.artwork_id:
-        target_id = args.worker_id if args.worker_id else args.artwork_id
-        app.type.set(0 if args.worker_id else 1)  # 切换类型
+    if args.w or args.a:
+        target_id = args.w if args.w else args.a
+        app.type.set(0 if args.w else 1)  # 切换类型
         app.input_var_UID.set(target_id)
         # 更新cookie
         if args.cookie != cookie_json and args.cookie is not None:
