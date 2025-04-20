@@ -127,7 +127,7 @@ class PixivApp:
         self.welcome.set("欢迎，登录可以下载更多图片！")
         # 创建控件
         self.create_widgets()
-        self.isLogin = self.is_login_by_name()
+        self.root.after(100, lambda: thread_it(self.is_login_by_name))
         # 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
@@ -255,11 +255,15 @@ class PixivApp:
             logging.info("已取消登录")
 
     def is_login_by_name(self):
-        if get_username():
+        logging.info("正在获取用户信息。。。")
+        username = get_username()
+        if username:
             self.login_btn_text.set("退出登录")
-            self.welcome.set(f"你好，{get_username()}！")
-            return True
-        return False
+            self.welcome.set(f"你好，{username}！")
+            self.isLogin = True
+            logging.info(f'{username}已登录。')
+        else:
+            self.isLogin = False
 
     # 是否查看网页
     def is_visit_space(self):
@@ -379,28 +383,13 @@ if __name__ == '__main__':
     if_exit_finish = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-w', help='画师ID')
-    parser.add_argument('-a', help='作品ID')
+    parser.add_argument('-w', '-work',  help='画师ID')
+    parser.add_argument('-a', '-artwork', help='作品ID')
     parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('-sn', action='store_true', help='是否立即开始下载')
-    parser.add_argument('-ef', action='store_true', help='程序结束时自动退出')
-    parser.add_argument('--url', help='链接')
+    parser.add_argument('-sn', '-start-now',  action='store_true', help='是否立即开始下载')
+    parser.add_argument('-ef', '-exit-finish', action='store_true', help='程序结束时自动退出')
 
     args = parser.parse_args()
-
-    if args.url:
-        contents = args.url.split('/')
-        for i in range(len(contents)):
-            if contents[i] == '-w':
-                args.w = contents[i + 1]
-            elif contents[i] == '-a':
-                args.a = contents[i + 1]
-            elif contents[i] == '-cookie':
-                args.cookie = contents[i + 1]
-            elif contents[i] == '-sn':
-                args.sn = True
-            elif contents[i] == '-ef':
-                args.ef = True
 
     if args.a and args.w:
         logging.warning("一个一个来~")
