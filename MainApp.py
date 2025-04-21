@@ -39,8 +39,8 @@ type_config = {
 cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 
-def thread_it(func, *args):
-    thread = threading.Thread(target=func, args=args)
+def thread_it(func, *t_args):
+    thread = threading.Thread(target=func, args=t_args)
     thread.daemon = True
     thread.start()
 
@@ -96,12 +96,11 @@ def check_registry_key_exists(key_path):
 # 应用界面框
 class PixivApp:
     def __init__(self, root_app):
-        self.downloader = None
         self.isLogin = False
         self.is_stopped_btn = False
         self.is_paused_btn = False
         self.root = root_app
-        self.root.geometry('700x600+400+5')
+        self.root.geometry('400x600+400+50')
         self.root.title('pixiv下载器')
         img_path = FileHandler.resource_path('img\\92260993.png')
         self.root.img = PhotoImage(file=img_path)
@@ -110,6 +109,7 @@ class PixivApp:
         self.current_progress = 0
         self.style = ttk.Style()
         self.style.theme_use('clam')
+        self.downloader = None
         self.button_submit = None
         self.process_text = None
         self.btn_pause = None
@@ -119,7 +119,9 @@ class PixivApp:
         self.progress_bar = {}
         self.input_var_UID = StringVar()  # 接受链接/uid
         self.input_var_UID.trace("w", self.update_content)
-        self.space_visit = BooleanVar()  # 是否查看画师主页
+        self.is_space_visit = BooleanVar()  # 是否查看画师主页
+        self.is_finish_exit = BooleanVar()  # 是否下载完退出
+        self.is_open_dir = BooleanVar()  # 是否下载完打开目录
         self.type = IntVar()  # 画师类型  0: 画师  1: 插画
         self.welcome = StringVar()  # 欢迎语
         self.login_btn_text = StringVar()
@@ -138,8 +140,8 @@ class PixivApp:
 
         # 登录
         login_frame = LabelFrame(self.root)
-        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=('黑体', 15), command=self.login_or_out,
-                           width=40, relief='groove',
+        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=('黑体', 12), command=self.login_or_out,
+                           width=15, relief='groove',
                            compound='center')
         login_welcome = Label(login_frame, textvariable=self.welcome, font=('黑体', 12))
         login_welcome.pack(side='left', padx=5)
@@ -148,32 +150,31 @@ class PixivApp:
 
         # 键入uid
         input_frame = LabelFrame(self.root)
-        label_input = Label(input_frame, text='请输入链接/UID:', font=('黑体', 18))
-        entry = Entry(input_frame, width=40, relief='flat', textvariable=self.input_var_UID)
-        type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=1, variable=self.type, value=0)
-        type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=1, variable=self.type, value=1)
-        label_type = Label(input_frame, text='作品类型:', font=('黑体', 12))
+        label_input = Label(input_frame, text='请输入链接/UID:', font=('黑体', 10))
+        entry = Entry(input_frame, width=50, relief='flat', textvariable=self.input_var_UID)
+        type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=2, variable=self.type, value=0)
+        type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=2, variable=self.type, value=1)
         type_btn2.pack(side='right', padx=5)
         type_btn1.pack(side='right', padx=5)
         label_input.pack(side='left')
         entry.pack(side='left', fill='both')
-        label_type.pack(side='right', padx=10)
         input_frame.pack(fill='both', pady=(0, 5))
 
         # 跳转空间
         choose_frame = LabelFrame(self.root)
-        label = Label(choose_frame, text='要去空间看看吗？', font=('黑体', 12))
-
-        space_btn1 = Radiobutton(choose_frame, text='是的，我要康', font=('宋体', 11), variable=self.space_visit,
-                                 value=True, height=2)
-        space_btn2 = Radiobutton(choose_frame, text='不用了，懒得点', font=('宋体', 11), variable=self.space_visit,
-                                 value=False, height=2)
-        self.space_visit.set(False)
-        label.pack(side='left')
-        space_btn2.pack(side='left', padx=20)
-        space_btn1.pack(side='left', padx=20)
-
+        goto_btn = Checkbutton(choose_frame, text='跳转空间', font=('黑体', 10),
+                               height=2, variable=self.is_space_visit)
+        open_btn = Checkbutton(choose_frame, text='下载后打开', font=('黑体', 10),
+                                height=2, variable=self.is_open_dir)
+        quit_btn = Checkbutton(choose_frame, text='下载后退出', font=('黑体', 10),
+                                height=2, variable=self.is_finish_exit)
+        goto_btn.pack(side='left', padx=15)
+        quit_btn.pack(side='left', anchor='center', expand=True)
+        open_btn.pack(side='right', padx=15)
         choose_frame.pack(fill='both', pady=(0, 5))
+        self.is_space_visit.set(False)
+        self.is_open_dir.set(True)
+        self.is_finish_exit.set(False)
 
         # 提交按钮
         self.button_submit = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound='center',
@@ -206,8 +207,7 @@ class PixivApp:
         self.log_text.tag_configure("red", foreground="red")
         self.log_text.insert('1.0',  # 插入默认日志信息
                              '欢迎使用 PIXIV 图片下载器 ！\n'
-                             '登录以下载更多图片，失效时再重新登录。\n'
-                             '---------------------------------------------------------------------------------------------------\n')
+                             '登录以下载更多图片，失效时再重新登录。\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
         self.log_text.pack(fill='both', expand=True)
 
@@ -265,10 +265,6 @@ class PixivApp:
         else:
             self.isLogin = False
 
-    # 是否查看网页
-    def is_visit_space(self):
-        return self.space_visit.get()
-
     # 提交id
     def submit_id(self):
         try:
@@ -293,14 +289,19 @@ class PixivApp:
 
             parts = input_UID.split(f'/{type}/')
             input_UID = parts[-1].split('/')[0] if parts else input_UID
+            parts = input_UID.split('?')
+            input_UID = parts[0] if parts else input_UID
 
             if self.is_visit_space():
                 webbrowser.open(f"https://www.pixiv.net/{type}/{input_UID}")
 
             self.downloader = ThroughId(input_UID, app, type)
-            self.downloader.pre_download()
 
-            if if_exit_finish:
+            already_path = self.downloader.pre_download()
+            if already_path and self.is_open_finish():
+                os.startfile(already_path)
+
+            if if_exit_finish or self.is_exit_finish():
                 logging.info("程序即将自动退出~")
                 time.sleep(3)
                 root.destroy()
@@ -313,7 +314,8 @@ class PixivApp:
             self.btn_stop.config(state=DISABLED)
             self.btn_pause.config(state=DISABLED)
 
-    def update_content(self, *args):
+    # 更新输入框
+    def update_content(self, *_):
         input_text = self.input_var_UID.get()
         logging.debug(f"update_content, 输入的id为：{input_text}")
         if TYPE_WORKER in input_text:
@@ -338,6 +340,21 @@ class PixivApp:
 
     def update_progress_bar_color(self, color):
         self.style.configure("Custom.Horizontal.TProgressbar", background=color)
+
+    # 是否访问空间
+    def is_visit_space(self):
+        logging.info(f"正在跳转空间,{self.input_var_UID.get()}")
+        return self.is_space_visit.get()
+
+    # 是否下载后退出
+    def is_exit_finish(self):
+        logging.debug(f"已选择下载完退出")
+        return self.is_finish_exit.get()
+
+    # 是否下载后打开文件夹
+    def is_open_finish(self):
+        logging.debug(f"下载完后打开文件夹")
+        return self.is_open_dir.get()
 
     # 暂停下载
     def toggle_pause(self):
@@ -383,10 +400,10 @@ if __name__ == '__main__':
     if_exit_finish = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-w', '-work',  help='画师ID')
+    parser.add_argument('-w', '-work', help='画师ID')
     parser.add_argument('-a', '-artwork', help='作品ID')
     parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('-sn', '-start-now',  action='store_true', help='是否立即开始下载')
+    parser.add_argument('-sn', '-start-now', action='store_true', help='是否立即开始下载')
     parser.add_argument('-ef', '-exit-finish', action='store_true', help='程序结束时自动退出')
 
     args = parser.parse_args()
