@@ -24,6 +24,7 @@ languages = {
     "ko": ["의 일러스트", "의 만화"]
 }
 
+
 def get_username():
     try:
         headers = {
@@ -202,9 +203,10 @@ class PixivDownloader:
 
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
-            os.startfile(self.mkdirs)
+            return self.mkdirs
         except IndexError as e:
             logging.warning("未找到该画师,请重新输入~")
+            return None
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
@@ -371,9 +373,16 @@ class ThroughId(PixivDownloader):
 
     def pre_download(self):
         if self.type == TYPE_ARTWORKS:
-            logging.info(f"正在通过插画ID({self.id})检索图片...")
-            self.download_images([self.id], self.type)
+            img_ids = [self.id]
+            log_msg = f"正在通过插画ID({self.id})检索图片..."
         elif self.type == TYPE_WORKER:
-            logging.info(f"正在通过画师ID({self.id})检索图片...")
-            img_ids = self.get_img_ids()
-            self.download_images(img_ids, self.type)
+            log_msg = f"正在通过画师ID({self.id})检索图片..."
+            img_ids = self.get_img_ids() or []  # 空列表容错
+            if not isinstance(img_ids, list):  # 类型校验
+                logging.critical("程序内部错误，必须返回列表类型")
+                raise ValueError("必须返回列表类型")
+        else:
+            logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
+            raise ValueError(f"无效的资源类型: {self.type}")
+        logging.info(log_msg)
+        return self.download_images(img_ids, self.type)
