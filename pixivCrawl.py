@@ -777,28 +777,13 @@ if __name__ == '__main__':
     if_exit_finish = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-w', help='画师ID')
-    parser.add_argument('-a', help='作品ID')
+    parser.add_argument('-w', '-work',  help='画师ID')
+    parser.add_argument('-a', '-artwork', help='作品ID')
     parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('-sn', action='store_true', help='是否立即开始下载')
-    parser.add_argument('-ef', action='store_true', help='程序结束时自动退出')
-    parser.add_argument('--url', help='链接')
+    parser.add_argument('-sn', '-start-now',  action='store_true', help='是否立即开始下载')
+    parser.add_argument('-ef', '-exit-finish', action='store_true', help='程序结束时自动退出')
 
     args = parser.parse_args()
-
-    if args.url:
-        contents = args.url.split('/')
-        for i in range(len(contents)):
-            if contents[i] == '-w':
-                args.w = contents[i + 1]
-            elif contents[i] == '-a':
-                args.a = contents[i + 1]
-            elif contents[i] == '-cookie':
-                args.cookie = contents[i + 1]
-            elif contents[i] == '-sn':
-                args.sn = True
-            elif contents[i] == '-ef':
-                args.ef = True
 
     if args.a and args.w:
         logging.warning("一个一个来~")
