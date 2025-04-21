@@ -38,8 +38,8 @@ pixivCrawl.exe -w "755446" -cookie " " -sn -ef
 pixivCrawl.exe -a "129270666" -cookie " " -sn -ef  
 ```
 必填项部分：
-- `-w` | `--workerID` 画师ID
-- `-a` | `--artworkID`  作品ID
+- `-w` | `--worker` 画师ID
+- `-a` | `--artwork`  作品ID
 
 **注意-w 和 -a 只能二选一**
 
