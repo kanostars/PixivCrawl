@@ -10,8 +10,7 @@ Pixiv下载器-直连版是PixivCrawl的一个分支，旨在不使用vpn、加�
 
 ## 项目申明
 Pixiv下载器-直连版不保证稳定连接，不保证版本为最新，功能与原下载器相比可能会有一定差异。
-建议首选原下载器。
-[原下载器](https://github.com/kanostars/PixivCrawl/tree/master)
+建议首选[原下载器](https://github.com/kanostars/PixivCrawl/tree/master)。
 
 Pixiv下载器-直连版不提供任何外网连接，只支持自身对Pixiv网站的连接。
 

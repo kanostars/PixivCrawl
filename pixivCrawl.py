@@ -25,7 +25,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdrivermanager_cn import ChromeDriverManagerAliMirror
 
-import NoVPNConnect
+import version
+import zco
 from utils import *
 
 TYPE_WORKER = "artist"  # 类型是画师
@@ -176,7 +177,7 @@ class PixivDownloader:
             return
         while self.app.is_paused:
             time.sleep(0.5)
-        resp = NoVPNConnect.connect(url, headers=self.headers)
+        resp = zco.connect(url, headers=self.headers)
         self.downloading_resp.append(resp)
 
         with open(save_path, 'rb+') as f:
@@ -275,7 +276,7 @@ class PixivDownloader:
 
     def get_worker_name(self, img_id):
         artworks_id = f"https://www.pixiv.net/artworks/{img_id}"
-        requests_worker = NoVPNConnect.connect(artworks_id, headers=self.headers)
+        requests_worker = zco.connect(artworks_id, headers=self.headers)
         re_txt = requests_worker.text
         # 获取浏览器语言
         lang = re.findall(r' lang="(.*?)"', re_txt)
@@ -320,7 +321,7 @@ class PixivDownloader:
     def download_by_art_worker_id(self, img_id):
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
 
-        response = NoVPNConnect.connect(ugoira_url, headers=self.headers)
+        response = zco.connect(ugoira_url, headers=self.headers)
 
         data = response.json
         if data['error']:  # 是静态图
@@ -329,7 +330,7 @@ class PixivDownloader:
             self.download_gifs(data, img_id)
 
     def download_static_images(self, img_id):
-        response = NoVPNConnect.connect(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
+        response = zco.connect(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers)
 
         # 解析响应以获取所有静态图片的URL
         static_url = response.json['body']
@@ -378,7 +379,7 @@ class PixivDownloader:
     # 获取用户的所有作品id
     def get_img_ids(self):
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
-        response = NoVPNConnect.connect(id_url, headers=self.headers)
+        response = zco.connect(id_url, headers=self.headers)
         return re.findall(r'"(\d+)":null', response.text)
 
     def pre_download(self):
@@ -473,6 +474,7 @@ class PixivApp:
         self.welcome = StringVar() # 欢迎语
         self.welcome.set('欢迎使用pixiv下载器，请登录')
         self.input_var_UID = StringVar()  # 接受画师id/插画id或者链接
+        self.input_var_UID.trace('w', self.update_content)
         self.type = StringVar()  # 选择画师/插画
         self.type.set(TYPE_ARTWORKS)
         self.inputCookie_var = StringVar()  # 接受登陆后的cookie
@@ -550,8 +552,9 @@ class PixivApp:
         self.log_text = Text(self.root, height=10)
         self.log_text.tag_configure("red", foreground="red")
         self.log_text.insert('1.0',  # 插入默认日志信息
-                             '欢迎使用 PIXIV 图片下载器 ！\n'
+                             f'欢迎使用 Pixiv下载器-直连版 v{version.__version__} ！\n'
                              '登录以下载更多图片，失效时再重新登录。\n'
+                             f'本下载器由zco v{zco.__version__}提供网络服务。\n'
                              '---------------------------------------------------------------------------------------------------\n')
         self.log_text.config(state='disabled')  # 禁用编辑功能
 
@@ -595,56 +598,69 @@ class PixivApp:
         self.log_text.pack(fill='both', expand=True)
 
     def login_or_out(self):
-        # try:
-        if not self.isLogin:
-            service = Service(executable_path=ChromeDriverManagerAliMirror().install())
-            options = webdriver.ChromeOptions()
-            options.add_argument('--host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4,MAP *pinterest.com U5,MAP *pinimg.com U5"')
-            options.add_argument('--host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133,MAP U5 151.101.0.84"')
-            options.add_argument('--test-type')
-            options.add_argument('--ignore-certificate-errors')
-            prefs = {
-                "profile.managed_default_content_settings.images": 2,  # 禁止加载图片
-            }
-            options.add_experimental_option("prefs", prefs)
-            driver = webdriver.Chrome(options=options, service=service)
-            driver.get('https://accounts.pixiv.net/login')
-            WebDriverWait(driver, 300).until(
-                EC.url_contains("www.pixiv.net")  # 检查目标URL包含的关键字
-            )
-            # 获取最终跳转后的URL
-            for cookie in driver.get_cookies():
-                if cookie['name'] == 'PHPSESSID':
-                    self.cookie = f'PHPSESSID={cookie['value']}'
-                    logging.debug(f'用户登录获得的cookie: {self.cookie}')
-                    div_text = driver.find_element(By.CSS_SELECTOR, 'div.jePfsr').get_attribute('outerHTML')
-                    self.username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', div_text).group(1)
-                    logging.info(f"用户{self.username}已登录~")
-                    self.welcome.set(f'你好，{self.username}！')
-                    self.login_btn_text.set("退出登录")
-                    self.isLogin = True
-                    driver.close()
-                    break
-            cookie_temp = self.cookie if self.cookie else config['cookie']
+        try:
+            if not self.isLogin:
+                service = Service(executable_path=ChromeDriverManagerAliMirror().install())
+                options = webdriver.ChromeOptions()
+                options.add_argument('--host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4,MAP *pinterest.com U5,MAP *pinimg.com U5"')
+                options.add_argument('--host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133,MAP U5 151.101.0.84"')
+                options.add_argument('--test-type')
+                options.add_argument('--ignore-certificate-errors')
+                prefs = {
+                    "profile.managed_default_content_settings.images": 2,  # 禁止加载图片
+                }
+                options.add_experimental_option("prefs", prefs)
+                driver = webdriver.Chrome(options=options, service=service)
+                driver.get('https://accounts.pixiv.net/login')
+                WebDriverWait(driver, 300).until(
+                    EC.url_contains("www.pixiv.net")  # 检查目标URL包含的关键字
+                )
+                # 获取最终跳转后的URL
+                for cookie in driver.get_cookies():
+                    if cookie['name'] == 'PHPSESSID':
+                        self.cookie = f'PHPSESSID={cookie['value']}'
+                        logging.debug(f'用户登录获得的cookie: {self.cookie}')
+                        div_text = driver.find_element(By.CSS_SELECTOR, 'div.jePfsr').get_attribute('outerHTML')
+                        self.username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', div_text).group(1)
+                        logging.info(f"用户{self.username}已登录~")
+                        self.welcome.set(f'你好，{self.username}！')
+                        self.login_btn_text.set("退出登录")
+                        self.isLogin = True
+                        driver.close()
+                        break
+                cookie_temp = self.cookie if self.cookie else config['cookie']
 
-            # 更新cookie
-            if cookie_temp != config['cookie'] and cookie_temp:
-                config['cookie'] = cookie_temp
+                # 更新cookie
+                if cookie_temp != config['cookie'] and cookie_temp:
+                    config['cookie'] = cookie_temp
+                    update_json(config)
+                    logging.debug(f"cookie已更新为：{cookie_temp}")
+
+            else:
+                logging.info(f"已成功退出")
+                self.isLogin = False
+                config['cookie'] = ''
                 update_json(config)
-                logging.debug(f"cookie已更新为：{cookie_temp}")
+                self.login_btn_text.set("登录")
+                self.welcome.set("欢迎，登录可以下载更多图片！")
+        except Exception as e:
+            logging.debug(f"登录失败，错误信息：{e}")
+            logging.info("已取消登录")
 
-        else:
-            logging.info(f"已成功退出")
-            self.isLogin = False
-            config['cookie'] = ''
-            update_json(config)
-            self.login_btn_text.set("登录")
-            self.welcome.set("欢迎，登录可以下载更多图片！")
+    def update_content(self, *_):
+        content = self.input_var_UID.get()
+        artwork_content = re.search('www.pixiv.net/artworks/(\\d+)', content)
+        if artwork_content:
+            self.type.set(TYPE_ARTWORKS)
+            self.input_var_UID.set(artwork_content.group(1))
+            return
+        worker_content = re.search('www.pixiv.net/users/(\\d+)', content)
+        if worker_content:
+            self.type.set(TYPE_WORKER)
+            self.input_var_UID.set(worker_content.group(1))
+            return
 
 
-        # except Exception as e:
-        #     logging.debug(f"登录失败，错误信息：{e}")
-        #     logging.info("已取消登录")
 
     @thread_it
     def is_login_by_name(self):
@@ -663,7 +679,7 @@ class PixivApp:
                        'User-agent': config['user_agent'],
                        'Cookie': self.cookie,
                        'Accept-Transfer-Encoding': 'identity'}
-            res = NoVPNConnect.connect('https://www.pixiv.net/', headers=headers)
+            res = zco.connect('https://www.pixiv.net/', headers=headers)
             username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', res.text).group(1)
             return username
         except Exception as e:
@@ -677,7 +693,7 @@ class PixivApp:
     def open_browser(self):
         result = messagebox.askokcancel("警告", "打开浏览器时会将正在运行的浏览器关闭！")
         if result:
-            if (NoVPNConnect.open_pixiv(self.browser_path.get()) and
+            if (zco.open_pixiv(self.browser_path.get()) and
                     (not config.get('browser_path') or config.get('browser_path') != self.browser_path.get())):
                 config['browser_path'] = self.browser_path.get()
                 update_json(config)

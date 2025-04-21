@@ -3,8 +3,8 @@ import logging
 import socket
 import ssl
 import subprocess
-import threading
 import os
+import time
 
 retry_times = 0
 browser_list = ['chrome.exe', 'msedge.exe']
