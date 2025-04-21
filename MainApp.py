@@ -100,7 +100,7 @@ class PixivApp:
         self.is_stopped_btn = False
         self.is_paused_btn = False
         self.root = root_app
-        self.root.geometry('400x600+400+50')
+        self.root.geometry('430x570+400+50')
         self.root.title('pixiv下载器')
         img_path = FileHandler.resource_path('img\\92260993.png')
         self.root.img = PhotoImage(file=img_path)
@@ -132,6 +132,8 @@ class PixivApp:
         self.root.after(100, lambda: thread_it(self.is_login_by_name))
         # 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # 锁定窗口大小
+        # self.root.resizable(False, False)
 
     def create_widgets(self):
         # 图片框
