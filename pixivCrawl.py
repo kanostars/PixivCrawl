@@ -462,6 +462,7 @@ class PixivApp:
         self.is_stop = False
         self.is_paused = False
         self.isLogin = False
+        self.is_closed = False
         self.cookie = ''
         self.username = ''
 
@@ -491,6 +492,8 @@ class PixivApp:
         self.pack_widgets()
 
         self.is_login_by_name()
+
+        self.root.protocol('WM_DELETE_WINDOW', self.on_closing)
 
     def create_widgets(self):
         # 图片框
@@ -660,6 +663,12 @@ class PixivApp:
             self.input_var_UID.set(worker_content.group(1))
             return
 
+    def on_closing(self):
+        self.stop_download()
+        self.is_closed = True
+        self.root.destroy()
+        exit(0)
+
 
 
     @thread_it
@@ -728,6 +737,8 @@ class PixivApp:
         except Exception as e:
             logging.error(e)
         finally:
+            if self.is_closed:
+                return
             self.is_stop = False
             self.is_paused = False
             self.btn_pause.config(text=' ⏸ ')

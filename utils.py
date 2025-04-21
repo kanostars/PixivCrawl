@@ -5,7 +5,7 @@ from functools import wraps
 def thread_it(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
-        t = threading.Thread(target=func, args=args, kwargs=kwargs)
+        t = threading.Thread(target=func, args=args, kwargs=kwargs, daemon=True)
         t.start()
         return t
     return wrapper

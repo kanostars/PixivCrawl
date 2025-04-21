@@ -6,6 +6,8 @@ import subprocess
 import os
 import time
 
+from .cookies import Cookies
+
 retry_times = 0
 browser_list = ['chrome.exe', 'msedge.exe']
 
@@ -23,7 +25,7 @@ class ConnectParent:
         self.nr = None
         self.url = ''
         self._headers = {}
-        self.cookies = {}
+        self.cookies = Cookies()
         self.status_code = 0
 
         self.resp_headers = None
@@ -176,14 +178,8 @@ class ConnectParent:
                         for h in hs:
                             t = h.split(': ')
                             if len(t) == 2:
-                                # todo cookie暂时放在字典里
                                 if t[0] == 'Set-Cookie':
-                                    cks = t[1].split(';')
-                                    # for ck in cks:
-                                    ck = cks[0].strip()
-                                    if '=' in ck:
-                                        ck = ck.split('=')
-                                        self.cookies[ck[0]] = ck[1]
+                                    self.cookies.add_cookies(t[1])
                                 if t[0] in headers:
                                     headers[t[0]] += ', ' + t[1]
                                 else:
