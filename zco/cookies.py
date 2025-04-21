@@ -11,6 +11,7 @@ class Cookies:
     def add_cookies(self, cookie):
         self.cookies.append(CookieJar(cookie))
 
+
 class CookieJar:
     def __init__(self, cookie=None):
         self.cookie = {
