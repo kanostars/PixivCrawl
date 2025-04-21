@@ -1,16 +1,11 @@
 import argparse
 import concurrent
-import ctypes
-import json
 import os
 import re
-import sys
 import time
 import webbrowser
-import winreg
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
 from tkinter import filedialog
 from tkinter import messagebox
@@ -25,6 +20,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdrivermanager_cn import ChromeDriverManagerAliMirror
 
+import file_handler
+import log_handler
 import version
 import zco
 from utils import *
@@ -32,7 +29,6 @@ from utils import *
 TYPE_WORKER = "artist"  # 类型是画师
 TYPE_ARTWORKS = "artWork"  # 类型是插画
 
-relative_base_path = os.path.dirname(os.path.abspath(sys.argv[0]))
 config = {}
 
 languages = {
@@ -41,110 +37,6 @@ languages = {
     "ja": ["のイラスト", "のマンガ"],
     "ko": ["의 일러스트", "의 만화"]
 }
-
-default_data = {
-    "cookie": "",
-    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
-}
-
-
-# 创建文件夹
-def create_directory(*base_dir):
-    mkdir = os.path.join(relative_base_path, *base_dir)
-    os.makedirs(mkdir, exist_ok=True)
-    return mkdir
-
-
-# 创建或更新文件，清空文件内容
-def touch(file_path):
-    with open(file_path, 'wb') as f:
-        f.truncate(0)
-
-
-# 获取资源文件的绝对路径
-def resource_path(relative_path):
-    # PyInstaller 临时文件夹
-    base_path = getattr(sys, '_MEIPASS', None)
-    if base_path is None:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
-
-
-# 初始化日志
-def log_init():
-    # 创建日志记录器
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    log_format = "%(asctime)s - %(levelname)s - %(message)s"
-
-    # 创建文件处理器，将日志写入文件
-    mkdir_log = create_directory("log")
-    file_handler = TimedRotatingFileHandler(os.path.join(mkdir_log, 'my.log'),
-                                            when='midnight', interval=1, backupCount=7, encoding='utf-8')
-    file_handler.setFormatter(logging.Formatter(log_format))
-    file_handler.setLevel(logging.DEBUG)
-
-    # 创建Tkinter日志处理器
-    tkinter_handler = TkinterLogHandler(app.log_text)
-    tkinter_handler.setFormatter(logging.Formatter(log_format))
-    tkinter_handler.setLevel(logging.INFO)
-
-    # 添加处理器到日志记录器
-    logger.addHandler(file_handler)
-    logger.addHandler(tkinter_handler)
-
-
-# 创建注册表键
-def check_registry_key_exists(key_path):
-    if not ctypes.windll.shell32.IsUserAnAdmin():
-        logging.warning("请以管理员权限运行本程序")
-        return
-
-    try:
-        # 尝试打开注册表键
-        root_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-        winreg.DeleteKey(key, "")
-        winreg.CloseKey(key)
-        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-    except FileNotFoundError:
-        # 创建注册表键
-        logging.info("注册表键不存在，创建中...")
-        root_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
-        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-        winreg.SetValueEx(root_key, "URL Protocol", 0, winreg.REG_SZ, "")
-    path = f'"{os.path.abspath(sys.argv[0])}" "%1"'
-    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, path)
-    winreg.CloseKey(root_key)
-    winreg.CloseKey(key)
-
-
-# 读取json文件
-def read_json():
-    json_file = os.path.join(relative_base_path, "pixivCrawl.json")
-    try:
-        with open(json_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if 'cookie' not in data:
-                data['cookie'] = ''
-            if 'user_agent' not in data:
-                data['user_agent'] = default_data['user_agent']
-            return data
-    except FileNotFoundError:
-        logging.info("未找到配置文件，正在创建默认配置文件。")
-        with open(json_file, 'w', encoding='utf-8') as f:
-            out = json.dumps(default_data, indent=4, ensure_ascii=False)
-            f.write(out)
-        return default_data
-
-
-# 更新json文件
-def update_json(data):
-    json_file = os.path.join(relative_base_path, "pixivCrawl.json")
-
-    with open(json_file, 'w', encoding='utf-8') as f:
-        f.write(json.dumps(data, ensure_ascii=False, indent=4))
-    logging.info(f"成功更新配置文件")
 
 
 # p站图片下载器
@@ -162,7 +54,7 @@ class PixivDownloader:
         # 更新cookie
         if self.cookie and self.cookie != config['cookie']:
             config['cookie'] = self.cookie
-            update_json(config)
+            file_handler.update_json(config)
 
         self.headers = {'Referer': "https://www.pixiv.net/",
                         'User-agent': config['user_agent'],
@@ -193,9 +85,9 @@ class PixivDownloader:
             logging.info(f"画师名字: {self.artist}")
             if self.type == TYPE_WORKER:  # 类型是通过画师id
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-                self.dirs = create_directory("workers_IMG", self.artist)
+                self.dirs = file_handler.create_directory("workers_IMG", self.artist)
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
-                self.dirs = create_directory("artworks_IMG", img_ids[0])
+                self.dirs = file_handler.create_directory("artworks_IMG", img_ids[0])
 
             self.download_by_art_worker_ids(img_ids)
             if self.app.is_stop:
@@ -339,7 +231,7 @@ class PixivDownloader:
             url = urls['urls']['original']
             name = os.path.basename(url)
             file_path = os.path.join(self.dirs, f"@{self.artist} {name}")
-            touch(file_path)
+            file_handler.touch(file_path)
 
             self.add_download_queue(url, file_path)
 
@@ -348,7 +240,7 @@ class PixivDownloader:
         url = data['body']['originalSrc']  # GIF图像的原始URL
         name = f"@{self.artist} {img_id}.zip"
         file_path = os.path.join(self.dirs, name)
-        touch(file_path)
+        file_handler.touch(file_path)
         self.need_com_gif[img_id] = delays
 
         self.add_download_queue(url, file_path)
@@ -392,31 +284,6 @@ class PixivDownloader:
             self.download_images(img_ids, self.type)
 
 
-# 创建日志输出
-class TkinterLogHandler(logging.Handler):
-    def __init__(self, text_widget):
-        super().__init__()
-        self.text_widget = text_widget  # 保存Text控件作为日志输出目标
-        self.configure_tags()
-
-    def configure_tags(self):
-        # 定义不同日志级别的样式
-        self.text_widget.tag_configure("DEBUG", foreground="blue")
-        self.text_widget.tag_configure("INFO", foreground="black")
-        self.text_widget.tag_configure("WARNING", foreground="#FF7608")
-        self.text_widget.tag_configure("ERROR", foreground="red")
-        self.text_widget.tag_configure("CRITICAL", foreground="purple")
-
-    def emit(self, record):
-        msg = self.format(record)
-        log_level = record.levelname  # 获取日志级别
-
-        self.text_widget.configure(state='normal')
-        self.text_widget.insert('end', msg + '\n', log_level)  # 使用日志级别作为标签
-        self.text_widget.see('end')
-        self.text_widget.configure(state='disabled')
-
-
 # 应用界面框
 @log_it()
 class PixivApp:
@@ -424,7 +291,7 @@ class PixivApp:
         self.root = root_app
         self.root.geometry('700x750')
         self.root.title('pixiv下载器')
-        img_path = resource_path('img\\92260993.png')
+        img_path = file_handler.resource_path('img\\92260993.png')
         self.root.img = PhotoImage(file=img_path)
 
         # 组件
@@ -470,9 +337,9 @@ class PixivApp:
         self.style = ttk.Style()
         self.style.theme_use('clam')
 
-        self.login_btn_text = StringVar() # 登录按钮文字
+        self.login_btn_text = StringVar()  # 登录按钮文字
         self.login_btn_text.set('登录')
-        self.welcome = StringVar() # 欢迎语
+        self.welcome = StringVar()  # 欢迎语
         self.welcome.set('欢迎使用pixiv下载器，请登录')
         self.input_var_UID = StringVar()  # 接受画师id/插画id或者链接
         self.input_var_UID.trace('w', self.update_content)
@@ -480,7 +347,7 @@ class PixivApp:
         self.type.set(TYPE_ARTWORKS)
         self.inputCookie_var = StringVar()  # 接受登陆后的cookie
         self.space_visit = BooleanVar()  # 是否查看画师主页
-        self.browser_path = StringVar() # 浏览器路径
+        self.browser_path = StringVar()  # 浏览器路径
         if config.get('browser_path'):
             self.browser_path.set(config.get('browser_path'))
         self.b_users = BooleanVar()  # 是否查看画师主页
@@ -509,29 +376,33 @@ class PixivApp:
 
         # 登录
         self.login_frame = LabelFrame(self.root)
-        self.login_btn = Button(self.login_frame, textvariable=self.login_btn_text, font=('黑体', 15), command=self.login_or_out,
-                           width=40, relief='groove',
-                           compound='center')
+        self.login_btn = Button(self.login_frame, textvariable=self.login_btn_text, font=('黑体', 15),
+                                command=self.login_or_out,
+                                width=40, relief='groove',
+                                compound='center')
         self.login_welcome = Label(self.login_frame, textvariable=self.welcome, font=('黑体', 12))
 
         # 键入uid
         self.input_frame = LabelFrame(self.root)
         self.label_input = Label(self.input_frame, text='请输入链接/UID:', font=('黑体', 18))
         self.entry = Entry(self.input_frame, width=40, relief='flat', textvariable=self.input_var_UID)
-        self.type_btn1 = Radiobutton(self.input_frame, text='画师', font=('宋体', 10), height=1, variable=self.type, value=TYPE_WORKER)
-        self.type_btn2 = Radiobutton(self.input_frame, text='插画', font=('宋体', 10), height=1, variable=self.type, value=TYPE_ARTWORKS)
+        self.type_btn1 = Radiobutton(self.input_frame, text='画师', font=('宋体', 10), height=1, variable=self.type,
+                                     value=TYPE_WORKER)
+        self.type_btn2 = Radiobutton(self.input_frame, text='插画', font=('宋体', 10), height=1, variable=self.type,
+                                     value=TYPE_ARTWORKS)
         self.label_type = Label(self.input_frame, text='作品类型:', font=('黑体', 12))
 
         # 跳转空间
         self.choose_frame = LabelFrame(self.root)
         self.label = Label(self.choose_frame, text='要去空间看看吗？', font=('黑体', 12))
 
-        self.space_btn1 = Radiobutton(self.choose_frame, text='是的，我要康', font=('宋体', 11), variable=self.space_visit,
-                                 value=True, height=2)
-        self.space_btn2 = Radiobutton(self.choose_frame, text='不用了，懒得点', font=('宋体', 11), variable=self.space_visit,
-                                 value=False, height=2)
+        self.space_btn1 = Radiobutton(self.choose_frame, text='是的，我要康', font=('宋体', 11),
+                                      variable=self.space_visit,
+                                      value=True, height=2)
+        self.space_btn2 = Radiobutton(self.choose_frame, text='不用了，懒得点', font=('宋体', 11),
+                                      variable=self.space_visit,
+                                      value=False, height=2)
         self.space_visit.set(False)
-
 
         # 提交按钮
         self.button_submit = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound='center',
@@ -605,8 +476,10 @@ class PixivApp:
             if not self.isLogin:
                 service = Service(executable_path=ChromeDriverManagerAliMirror().install())
                 options = webdriver.ChromeOptions()
-                options.add_argument('--host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4,MAP *pinterest.com U5,MAP *pinimg.com U5"')
-                options.add_argument('--host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133,MAP U5 151.101.0.84"')
+                options.add_argument(
+                    '--host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4,MAP *pinterest.com U5,MAP *pinimg.com U5"')
+                options.add_argument(
+                    '--host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133,MAP U5 151.101.0.84"')
                 options.add_argument('--test-type')
                 options.add_argument('--ignore-certificate-errors')
                 prefs = {
@@ -636,14 +509,14 @@ class PixivApp:
                 # 更新cookie
                 if cookie_temp != config['cookie'] and cookie_temp:
                     config['cookie'] = cookie_temp
-                    update_json(config)
+                    file_handler.update_json(config)
                     logging.debug(f"cookie已更新为：{cookie_temp}")
 
             else:
                 logging.info(f"已成功退出")
                 self.isLogin = False
                 config['cookie'] = ''
-                update_json(config)
+                file_handler.update_json(config)
                 self.login_btn_text.set("登录")
                 self.welcome.set("欢迎，登录可以下载更多图片！")
         except Exception as e:
@@ -668,8 +541,6 @@ class PixivApp:
         self.is_closed = True
         self.root.destroy()
         exit(0)
-
-
 
     @thread_it
     def is_login_by_name(self):
@@ -705,8 +576,7 @@ class PixivApp:
             if (zco.open_pixiv(self.browser_path.get()) and
                     (not config.get('browser_path') or config.get('browser_path') != self.browser_path.get())):
                 config['browser_path'] = self.browser_path.get()
-                update_json(config)
-
+                file_handler.update_json(config)
 
     # 提交id
     @thread_it
@@ -774,24 +644,22 @@ class PixivApp:
         self.is_stop = True
 
 
-
 if __name__ == '__main__':
-    config = read_json()
+    config = file_handler.read_json()
 
     root = Tk()
     app = PixivApp(root)
 
-    log_init()  # 日志初始化
-    check_registry_key_exists(r"pixivdownload")
+    log_handler.log_init(app)  # 日志初始化
 
     is_start_now = False
     if_exit_finish = False
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-w', '-work',  help='画师ID')
+    parser.add_argument('-w', '-work', help='画师ID')
     parser.add_argument('-a', '-artwork', help='作品ID')
     parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('-sn', '-start-now',  action='store_true', help='是否立即开始下载')
+    parser.add_argument('-sn', '-start-now', action='store_true', help='是否立即开始下载')
     parser.add_argument('-ef', '-exit-finish', action='store_true', help='程序结束时自动退出')
 
     args = parser.parse_args()
@@ -812,14 +680,13 @@ if __name__ == '__main__':
     is_start_now = args.sn
     if_exit_finish = args.ef
 
-
     if args.w or args.a:
         target_id = args.w if args.w else args.a
         app.type.set(TYPE_WORKER if args.w else TYPE_ARTWORKS)  # 切换类型
         app.input_var_UID.set(target_id)
         # 更新cookie
         if args.cookie != config['cookie'] and args.cookie:
-            update_json(config)
+            file_handler.update_json(config)
             logging.debug(f"PHPSESSID已更新为：{args.cookie}")
 
         if is_start_now:
