@@ -80,10 +80,10 @@ class ConnectParent:
 
     @property
     def content(self):
-        if not self.nr is None:
+        if self.nr:
             while not self.resp_finished:
                 self.resp_headers, self.resp_content, self.resp_finished = next(self.nr)
-            logging.debug(self.resp_headers)
+            self.resp_headers, self.resp_content, self.resp_finished = next(self.nr)
             if not self.resp_headers.get('Content-Length'):
                 logging.debug(f'分块传输方式')
                 all_data = self.resp_content
