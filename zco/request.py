@@ -1,10 +1,13 @@
+import codecs
 import json
 import logging
+import re
 import socket
 import ssl
 import subprocess
 import os
 import time
+from urllib.parse import urlparse
 
 from zco.cookies import Cookies
 
@@ -12,22 +15,21 @@ retry_times = 0
 browser_list = ['chrome.exe', 'msedge.exe']
 
 
-class ConnectParent:
+class Request:
     def __init__(self):
         # 创建SSL上下文，禁用主机名检查
         self.context = ssl.create_default_context()
         self.context.check_hostname = False
         self.context.verify_mode = ssl.CERT_NONE
 
-        self.hostname = socket.gethostname()
+        self.hostname = ''
         self.conn = None
-
         self.nr = None
         self.url = ''
         self._headers = {}
+
         self.cookies = Cookies()
         self.status_code = 0
-
         self.resp_headers = None
         self.resp_content = b''
         self.resp_finished = False
@@ -38,8 +40,23 @@ class ConnectParent:
         self.url = url
         self._headers = headers
 
-        self.nr = self.rev()
+        if not self.conn:
+            self.hostname = urlparse(url).hostname
+            self.conn = socket.create_connection((self.hostname, 443), 10)
 
+        self.nr = self.rev()
+        header = self.headers
+
+        if self.status_code == 302:
+            location = header.get('Location')
+            if location:
+                self.conn.close()
+                self.conn = None
+                self.nr = None
+                self.resp_headers = None
+                self.resp_finished = False
+                print(url, location, self._headers)
+                return self.get(location, headers=self._headers)
         return self
 
     def get_content_progress(self) -> float:
@@ -67,7 +84,23 @@ class ConnectParent:
     def text(self):
         text = self.content
         if text:
-            return text.decode('utf-8', 'replace')
+            # 新增编码检测逻辑
+            def detect_encoding(html_bytes):
+                # 优先检测HTML中的meta标签
+                meta_tag = html_bytes[:2000].decode('ascii', errors='ignore').lower()
+                charset = re.search(r'charset=(.*?)["\'; ]', meta_tag)
+                if charset:
+                    charset = charset.group(1).strip().strip('"').strip("'")
+                    try:
+                        return codecs.lookup(charset).name
+                    except LookupError:
+                        return 'utf-8'
+                # 回退到默认utf-8
+                return 'utf-8'
+
+            # 使用检测到的编码进行解码
+            encoding = detect_encoding(text)
+            return text.decode(encoding, 'replace')
         return None
 
     @property
@@ -125,7 +158,7 @@ class ConnectParent:
         if self._headers is None:
             self._headers = {}
         zh = {
-            'Host': 'www.pixiv.net',
+            'Host': self.hostname,
             'Connection': 'close'
         }
         for z in zh.keys():
@@ -197,28 +230,15 @@ class ConnectParent:
             s2.close()
 
 
-class ConnectMain(ConnectParent):
-    def __init__(self):
-        super().__init__()
-        self.conn = socket.create_connection(('210.140.139.155', 443), 10)
-
-        self.hostname = '210.140.139.155'
-
-
-class ConnectImg(ConnectParent):
-    def __init__(self):
-        super().__init__()
-        self.conn = socket.create_connection(('210.140.139.133', 443), 10)
-
-        self.hostname = '210.140.139.133'
-
-
 def connect(url, headers=None):
+    request = Request()
     if 'pixiv.net' in url or 'fanbox.cc' in url:
-        return ConnectMain().get(url, headers)
+        request.conn = socket.create_connection(('210.140.139.155', 443), 10)
+        request.hostname = '210.140.139.155'
     if 'pximg.net' in url:
-        return ConnectImg().get(url, headers)
-    return None
+        request.conn = socket.create_connection(('210.140.139.133', 443), 10)
+        request.hostname = '210.140.139.133'
+    return request.get(url, headers)
 
 
 def exec_cmd(cmd):

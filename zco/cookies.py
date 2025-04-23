@@ -21,6 +21,7 @@ class CookieJar:
             'path': '',
             'expires': '',
             'max-age': '',
+            'version': '',
             'secure': False,
             'http-only': False,
         }
@@ -36,7 +37,7 @@ class CookieJar:
             cookie = cookie.strip()
             if cookie:
                 if '=' in cookie:
-                    cookie = cookie.split('=')
+                    cookie = cookie.split('=', 1)
                     cookie[0] = cookie[0].lower()
                     if cookie[0] in self.cookie:
                         self.cookie[cookie[0]] = cookie[1]
