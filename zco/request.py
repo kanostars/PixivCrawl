@@ -25,9 +25,12 @@ class Request:
         self.hostname = ''
         self.conn = None
         self.nr = None
-        self.url = ''
+        self._url = ''
+        self._method = 'GET'
+        self._data = None
         self._headers = {}
 
+        self.rules = {}
         self.cookies = Cookies()
         self.status_code = 0
         self.resp_headers = None
@@ -36,27 +39,24 @@ class Request:
         self.is_stopped = False
         self.is_paused = False
 
-    def get(self, url, headers=None):
-        self.url = url
+    def request(self, url, method='GET', headers=None, data=None):
+        self._method = method.upper()
+        self._url = url
         self._headers = headers
+        self._data = data
 
-        if not self.conn:
-            self.hostname = urlparse(url).hostname
-            self.conn = socket.create_connection((self.hostname, 443), 10)
+        self.hostname = urlparse(url).hostname
+
+        if self.rules.get('host-rules'):
+            for host, host_rule in self.rules['host-rules'].items():
+                host = host.replace('*', '(.*)')
+                if re.search(host, self.hostname):
+                    self.hostname = self.rules['host-resolver-rules'][host_rule]
+                    break
+
+        self.conn = socket.create_connection((self.hostname, 443), 10)
 
         self.nr = self.rev()
-        header = self.headers
-
-        if self.status_code == 302:
-            location = header.get('Location')
-            if location:
-                self.conn.close()
-                self.conn = None
-                self.nr = None
-                self.resp_headers = None
-                self.resp_finished = False
-                print(url, location, self._headers)
-                return self.get(location, headers=self._headers)
         return self
 
     def get_content_progress(self) -> float:
@@ -69,6 +69,35 @@ class Request:
             except KeyError:
                 return 0
         return 0
+
+    def set_rules(self, rules):
+        host_rules = re.search('--host-rules="(.*?)"', rules)
+        if host_rules:
+            if not self.rules.get('host-rules'):
+                self.rules['host-rules'] = {}
+            host_rules = host_rules.group(1).strip().split(',')
+            for host_rules in host_rules:
+                rule = host_rules.split(' ')
+                if len(rule) == 3 and rule[0].upper() == 'MAP':
+                    self.rules['host-rules'][rule[1]] = rule[2]
+                else:
+                    logging.warning(f'host-rules格式错误，{host_rules}')
+        host_resolver_rules = re.search('--host-resolver-rules="(.*?)"', rules)
+        if host_resolver_rules:
+            if not self.rules.get('host-resolver-rules'):
+                self.rules['host-resolver-rules'] = {}
+            host_resolver_rules = host_resolver_rules.group(1).strip().split(',')
+            for host_resolver_rule in host_resolver_rules:
+                rule = host_resolver_rule.split(' ')
+                if len(rule) == 3 and rule[0].upper() == 'MAP':
+                    self.rules['host-resolver-rules'][rule[1]] = rule[2]
+                else:
+                    logging.warning(f'host-resolver-rules格式错误，{host_resolver_rule}')
+
+    @property
+    def url(self):
+        _ = self.headers
+        return self._url
 
     @property
     def headers(self):
@@ -164,19 +193,23 @@ class Request:
         for z in zh.keys():
             self._headers[z] = zh.get(z)
         # 包装socket对象为SSL套接字
-        logging.debug(f'{self.url} 开始连接')
+        logging.debug(f'{self._url} 开始连接')
         logging.debug(self.hostname)
         s2 = self.context.wrap_socket(self.conn,
                                       server_hostname=self.hostname,
                                       do_handshake_on_connect=False)
         s2.do_handshake()
-        logging.debug(f'{self.url} 连接成功')
+        logging.debug(f'{self._url} 连接成功')
 
-        # 构造HTTP GET请求消息
-        http_request = f'GET {self.url} HTTP/1.1\r\n'
+        # 构造HTTP请求消息
+        http_request = f'{self._method} {self._url} HTTP/1.1\r\n'
         for h in self._headers.keys():
             http_request += f'{h}: {self._headers[h]}\r\n'
+        if self._data:
+            http_request += f'Content-Length: {len(self._data)}\r\n'
         http_request += f'\r\n'
+        if self._data:
+            http_request += self._data
 
         try:
             # 通过SSL套接字发送HTTP请求消息
@@ -188,7 +221,7 @@ class Request:
             headers = None
             while True:
                 if self.is_stopped:
-                    logging.debug(f'{self.url} 连接已被终止')
+                    logging.debug(f'{self._url} 连接已被终止')
                     s2.close()
                     return
                 if self.is_paused:
@@ -219,8 +252,19 @@ class Request:
                                     headers[t[0]] = t[1]
                         has_header = True
 
-                        logging.debug(f'{self.url} 状态代码：{self.status_code}')
-                        logging.debug(f'{self.url} Cookies:{self.cookies}')
+                        if self.status_code == 302:
+                            location = headers.get('Location')
+                            if location:
+                                if self.conn:
+                                    self.conn.close()
+                                self.conn = None
+                                self.nr = None
+                                self.resp_headers = None
+                                self.resp_finished = False
+                                self.request(location, method=self._method, headers=self._headers, data=self._data)
+
+                        logging.debug(f'{self._url} 状态代码：{self.status_code}')
+                        logging.debug(f'{self._url} Cookies:{self.cookies}')
                 yield headers, response_data, False
             while True:
                 yield headers, response_data, True
@@ -230,15 +274,11 @@ class Request:
             s2.close()
 
 
+
 def connect(url, headers=None):
     request = Request()
-    if 'pixiv.net' in url or 'fanbox.cc' in url:
-        request.conn = socket.create_connection(('210.140.139.155', 443), 10)
-        request.hostname = '210.140.139.155'
-    if 'pximg.net' in url:
-        request.conn = socket.create_connection(('210.140.139.133', 443), 10)
-        request.hostname = '210.140.139.133'
-    return request.get(url, headers)
+    request.set_rules('--host-rules="MAP api.fanbox.cc api.fanbox.cc,MAP *pixiv.net pixivision.net,MAP *fanbox.cc pixivision.net,MAP *pximg.net U4" --host-resolver-rules="MAP api.fanbox.cc 172.64.146.116,MAP pixivision.net 210.140.139.155,MAP U4 210.140.139.133"')
+    return request.request(url, method='GET', headers=headers)
 
 
 def exec_cmd(cmd):
