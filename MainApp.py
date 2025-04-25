@@ -69,30 +69,6 @@ def log_init():
     logger.addHandler(tkinter_handler)
 
 
-# 创建注册表键
-def check_registry_key_exists(key_path):
-    if not ctypes.windll.shell32.IsUserAnAdmin():
-        logging.warning("请以管理员权限运行本程序")
-        return
-    try:
-        # 尝试打开注册表键
-        root_key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path)
-        key = winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-        winreg.DeleteKey(key, "")
-        winreg.CloseKey(key)
-        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-    except FileNotFoundError:
-        # 创建注册表键
-        logging.info("注册表键不存在，创建中...")
-        root_key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path)
-        key = winreg.CreateKey(winreg.HKEY_CLASSES_ROOT, key_path + "\\shell\\open\\command")
-        winreg.SetValueEx(root_key, "URL Protocol", 0, winreg.REG_SZ, "")
-    path = f'"{os.path.abspath(sys.argv[0])}" --url "%1"'
-    winreg.SetValueEx(key, "", 0, winreg.REG_SZ, path)
-    winreg.CloseKey(root_key)
-    winreg.CloseKey(key)
-
-
 # 应用界面框
 class PixivApp:
     def __init__(self, root_app):
@@ -167,9 +143,9 @@ class PixivApp:
         goto_btn = Checkbutton(choose_frame, text='跳转空间', font=('黑体', 10),
                                height=2, variable=self.is_space_visit)
         open_btn = Checkbutton(choose_frame, text='下载后打开', font=('黑体', 10),
-                                height=2, variable=self.is_open_dir)
+                               height=2, variable=self.is_open_dir)
         quit_btn = Checkbutton(choose_frame, text='下载后退出', font=('黑体', 10),
-                                height=2, variable=self.is_finish_exit)
+                               height=2, variable=self.is_finish_exit)
         goto_btn.pack(side='left', padx=15)
         quit_btn.pack(side='left', anchor='center', expand=True)
         open_btn.pack(side='right', padx=15)
@@ -294,16 +270,17 @@ class PixivApp:
             parts = input_UID.split('?')
             input_UID = parts[0] if parts else input_UID
 
-            if self.is_visit_space():
+            if self.is_space_visit.get():
+                logging.info(f"正在跳转空间,{self.input_var_UID.get()}")
                 webbrowser.open(f"https://www.pixiv.net/{type}/{input_UID}")
 
             self.downloader = ThroughId(input_UID, app, type)
-
             already_path = self.downloader.pre_download()
-            if already_path and self.is_open_finish():
-                os.startfile(already_path)
 
-            if if_exit_finish or self.is_exit_finish():
+            if already_path and self.is_open_dir.get():
+                logging.debug(f"下载完后打开文件夹")
+                os.startfile(already_path)
+            if if_exit_finish or self.is_finish_exit.get():
                 logging.info("程序即将自动退出~")
                 time.sleep(3)
                 root.destroy()
@@ -343,21 +320,6 @@ class PixivApp:
     def update_progress_bar_color(self, color):
         self.style.configure("Custom.Horizontal.TProgressbar", background=color)
 
-    # 是否访问空间
-    def is_visit_space(self):
-        logging.info(f"正在跳转空间,{self.input_var_UID.get()}")
-        return self.is_space_visit.get()
-
-    # 是否下载后退出
-    def is_exit_finish(self):
-        logging.debug(f"已选择下载完退出")
-        return self.is_finish_exit.get()
-
-    # 是否下载后打开文件夹
-    def is_open_finish(self):
-        logging.debug(f"下载完后打开文件夹")
-        return self.is_open_dir.get()
-
     # 暂停下载
     def toggle_pause(self):
         self.is_paused_btn = not self.is_paused_btn
@@ -396,7 +358,6 @@ if __name__ == '__main__':
     app = PixivApp(root)
 
     log_init()  # 日志初始化
-    check_registry_key_exists(r"pixivdownload")
 
     is_start_now = False
     if_exit_finish = False

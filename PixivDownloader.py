@@ -158,8 +158,9 @@ class PixivDownloader:
         try:
             self.type = t
             self.artist = self.get_worker_name(img_ids[0])
+            self.artist = FileHandler.sanitize_filename(self.artist)
             if self.artist is None:
-                return
+                return None
             logging.info(f"画师名字: {self.artist}")
 
             if self.type == TYPE_WORKER:  # 类型是通过画师id
@@ -176,7 +177,7 @@ class PixivDownloader:
 
             if self.numbers == 0:
                 logging.warning("PHPSESSID已失效，请重新填写!")
-                return
+                return None
 
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
             self.app.update_progress_bar_color("green")
