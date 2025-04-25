@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import sys
 
 
@@ -52,8 +53,11 @@ class FileHandler:
     # 创建或更新文件，清空文件内容
     @staticmethod
     def touch(file_path):
-        with open(file_path, 'wb') as f:
-            f.truncate(0)
+        try:
+            with open(file_path, 'wb') as f:
+                f.truncate(0)
+        except OSError as e:
+            logging.error(f"无法创建文件 {file_path}，错误原因：{e}")
 
     # 获取资源文件的绝对路径
     @staticmethod
@@ -63,3 +67,9 @@ class FileHandler:
         if base_path is None:
             base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
+
+    @staticmethod
+    def sanitize_filename(filename):
+        # 移除Windows的非法字符
+        cleaned = re.sub(r'[\\/*?:"<>|]', "_", filename)
+        return cleaned.strip()
