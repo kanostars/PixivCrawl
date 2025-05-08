@@ -7,6 +7,7 @@ import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
+from PyQt6.QtCore import QObject, pyqtSignal
 from urllib3.util.retry import Retry
 from PIL import Image
 from requests.adapters import HTTPAdapter
@@ -46,8 +47,12 @@ def get_username():
 
 
 # p站图片下载器
-class PixivDownloader:
+class PixivDownloader(QObject):
+    progress_update = pyqtSignal(int, int)
+    finished = pyqtSignal(str)
+
     def __init__(self, pixiv_app, id):
+        super().__init__()
         self.app = pixiv_app
         self.id = id
         self.type = ""  # 输入的id类型
@@ -61,6 +66,8 @@ class PixivDownloader:
         self.need_com_gif = {}  # 需要合成的动图
         self.s = requests.Session()
         self.futures = []
+        self.lock = threading.Lock()
+
 
         # 暂停与终止事件
         self.is_paused = threading.Event()
@@ -79,6 +86,7 @@ class PixivDownloader:
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
         if self.check_status() is False:
+            logging.debug("任务已停止，放弃下载")
             return
 
         # 处理完整下载
@@ -95,7 +103,7 @@ class PixivDownloader:
                 if self.check_status() is False:
                     return
 
-                self.app.update_progress_bar(1)
+                self.app.progress_updated.emit(1, 0)
                 return
             except Exception as e:
                 logging.error(f"完整下载失败: {str(e)}")
@@ -111,7 +119,7 @@ class PixivDownloader:
             if current_size >= end_size:
                 if self.check_status() is False:
                     return
-                self.app.update_progress_bar(1)  # 更新进度条
+                self.app.progress_updated.emit(1, 0)
                 return
         except Exception as e:
             logging.error(f"下载图片时发生错误: {str(e)}")
@@ -143,7 +151,7 @@ class PixivDownloader:
             with open(save_path, 'rb+') as f:
                 f.seek(0, 0)
                 f.write(resp.content)
-            self.app.update_progress_bar(1)  # 更新进度条
+            self.app.progress_updated.emit(1, 0)
             return
 
         with open(save_path, 'rb+') as f:
@@ -152,7 +160,7 @@ class PixivDownloader:
             else:
                 f.seek(int(start_size), 0)
             f.write(resp.content)
-        self.app.update_progress_bar(1)  # 更新进度条
+        self.app.progress_updated.emit(1, 0)
 
     def download_images(self, img_ids, t):
         try:
@@ -168,10 +176,9 @@ class PixivDownloader:
                 self.mkdirs = FileHandler.create_directory("workers_IMG", f'{self.artist}({self.id})')
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = FileHandler.create_directory("artworks_IMG", img_ids[0])
-
-            self.app.update_progress_bar(0, len(img_ids))
+            self.app.progress_updated.emit(0, len(img_ids))
             self.download_by_art_worker_ids(img_ids)
-            self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
+            self.app.progress_updated.emit(0, len(self.download_queue))
 
             logging.info(f"检索结束...")
 
@@ -195,12 +202,12 @@ class PixivDownloader:
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar_color("yellow")
-                self.app.update_progress_bar(0, len(self.need_com_gif))
+                self.app.progress_updated.emit(0, len(self.need_com_gif))
                 for img_id in self.need_com_gif:
                     if self.check_status() is False:
                         break
                     self.comp_gif(img_id)
-                    self.app.update_progress_bar(1)
+                    self.app.progress_updated.emit(1, 0)
 
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
@@ -253,7 +260,7 @@ class PixivDownloader:
 
         if self.check_status() is False:
             return
-        self.app.update_progress_bar(1)
+        self.app.progress_updated.emit(1, 0)
 
     def download_static_images(self, img_id):
 
@@ -327,13 +334,12 @@ class PixivDownloader:
 
     def stop_all_tasks(self):
         logging.info("正在停止所有下载任务...")
-        self.is_stopped.set()
-        # 取消所有未完成任务
-        for future in self.futures:
-            future.cancel()
-        # 关闭网络会话
-        self.s.close()
-        logging.debug("所有下载线程已强制终止")
+        with self.lock:
+            self.is_stopped.set()
+            self.download_queue.clear()
+            self.need_com_gif.clear()
+        self.reset_session()
+
 
     def reset_session(self):
         logging.info("会话已重置")
@@ -351,11 +357,16 @@ class PixivDownloader:
             time.sleep(1)
         return True
 
+    def __del__(self):
+        self.progress_update.disconnect()
+        self.s.close()
+
 
 # 通过输入框获取id并准备下载图片
 class ThroughId(PixivDownloader):
     def __init__(self, id, pixiv_app, t):
         super().__init__(pixiv_app, id)
+        self.setParent(pixiv_app)
         self.id = id
         self.type = t
 
@@ -373,17 +384,21 @@ class ThroughId(PixivDownloader):
             return []
 
     def pre_download(self):
-        if self.type == TYPE_ARTWORKS:
-            img_ids = [self.id]
-            log_msg = f"正在通过插画ID({self.id})检索图片..."
-        elif self.type == TYPE_WORKER:
-            log_msg = f"正在通过画师ID({self.id})检索图片..."
-            img_ids = self.get_img_ids() or []  # 空列表容错
-            if not isinstance(img_ids, list):  # 类型校验
-                logging.critical("程序内部错误，必须返回列表类型")
-                raise ValueError("必须返回列表类型")
-        else:
-            logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
-            raise ValueError(f"无效的资源类型: {self.type}")
-        logging.info(log_msg)
-        return self.download_images(img_ids, self.type)
+        # try:
+            if self.type == TYPE_ARTWORKS:
+                img_ids = [self.id]
+                log_msg = f"正在通过插画ID({self.id})检索图片..."
+            elif self.type == TYPE_WORKER:
+                log_msg = f"正在通过画师ID({self.id})检索图片..."
+                img_ids = self.get_img_ids() or []  # 空列表容错
+            else:
+                logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
+                raise ValueError(f"无效的资源类型: {self.type}")
+
+            logging.info(log_msg)
+            save_path = self.download_images(img_ids, self.type)
+            return save_path
+        # except Exception as e:
+        #     logging.critical(f"程序内部错误: {e}")
+        #     return None
+

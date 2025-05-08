@@ -1,8 +1,12 @@
 import logging
+import os
 import sys
+import threading
+import time
+import webbrowser
 
-from PyQt6.QtCore import pyqtSignal, Qt, QObject
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox,
@@ -11,6 +15,7 @@ from PyQt6.QtWidgets import (
 
 from FileOrDirHandler import FileHandler
 from LogHandler import log_init, QtLogHandler
+from PixivDownloader import ThroughId
 
 TYPE_WORKER = "users"  # 类型是画师
 TYPE_ARTWORKS = "artworks"  # 类型是插画
@@ -24,14 +29,19 @@ cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 class PixivApp(QMainWindow):
     progress_updated = pyqtSignal(int, int)
+    update_ui = pyqtSignal(bool)
 
     def __init__(self, qt_handler=None):
         super().__init__()
+        self.download_thread = None
+        self.downloader = None
         self.init_ui()
         self.qt_handler = QtLogHandler(self.log_text) if qt_handler is None else qt_handler
         self.isLogin = False
-        self.is_stopped = False
-        self.is_paused = False
+        self.is_paused_btn = False  # 暂停按钮的状态
+        self.is_stopped_btn = False  # 停止按钮的状态
+        self.total_progress = 0
+        self.current_progress = 0
         self.connect_signals()
 
     def init_ui(self):
@@ -42,13 +52,7 @@ class PixivApp(QMainWindow):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
-        layout.setContentsMargins(20, 15, 20, 15)  # 四周留白
-
-        # 顶部图片区域
-        # img_label = QLabel()
-        # pixmap = QPixmap(FileHandler.resource_path('img\\92260993.png'))
-        # img_label.setPixmap(pixmap.scaled(800, 200, Qt.AspectRatioMode.KeepAspectRatio))
-        # layout.addWidget(img_label)
+        layout.setContentsMargins(20, 15, 20, 15)
 
         # 登录区域
         login_layout = QHBoxLayout()
@@ -96,28 +100,34 @@ class PixivApp(QMainWindow):
         # 进度条区域
         progress_layout = QHBoxLayout()
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                height: 10px;
-                background: #F0F0F0;  
-                border: 2px solid #C0C0C0;  
-                border-radius: 4px;  
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                border-radius: 3px;  
-                width: 10px;
-            }
-        """)
+        self.progress_bar.setStyleSheet(f"""
+                  QProgressBar {{
+                      height: 15px;
+                      background: white;
+                      border: 2px solid gray;
+                      border-radius: 5px;
+                      text-align: center;
+                  }}
+                  QProgressBar::chunk {{
+                      background-color: lightblue;
+                       background: qlineargradient(
+                      x1:0, y1:0, x2:1, y2:0,
+                      stop:0 lightblue, 
+                      stop:1 #FFB6C1
+                  );
+                  margin: 0.5px;  
+                          }}
+              """)
 
         self.progress_label = QLabel("0%")
         self.progress_label.setContentsMargins(10, 0, 0, 0)
         self.stop_btn = QPushButton("X")
+        self.stop_btn.setEnabled(False)
         self.stop_btn.setStyleSheet("background-color: red;")
-        self.stop_btn.setFixedSize(30, 30)  # 新增固定尺寸
+        self.stop_btn.setFixedSize(30, 30)
         self.pause_btn = QPushButton("||")
-        self.pause_btn.setFixedSize(30, 30)  # 新增固定尺寸
+        self.pause_btn.setEnabled(False)
+        self.pause_btn.setFixedSize(30, 30)
         progress_layout.addWidget(self.progress_label, stretch=10)
         progress_layout.addWidget(self.progress_bar, stretch=90)
         progress_layout.addWidget(self.pause_btn, stretch=0)
@@ -130,36 +140,146 @@ class PixivApp(QMainWindow):
         self.log_text.append('欢迎使用 PIXIV 图片下载器 ！\n登录以下载更多图片，失效时再重新登录。\n')
         layout.addWidget(self.log_text)
 
-    def update_progress(self, current, total):
-        self.progress_bar.setMaximum(total)
-        self.progress_bar.setValue(current)
-        self.progress_label.setText(f"{(current / total * 100):.2f}%")
+    def update_progress(self, increment, total=0):
+        if total > 0:
+            self.progress_bar.setMaximum(total)
+            self.current_progress = 0
+        else:
+            self.current_progress += increment
+        self.progress_bar.setValue(self.current_progress)
+        progress_percent = (self.current_progress / self.progress_bar.maximum()) * 100
+        self.progress_label.setText(f"{progress_percent:.2f}%")
+        # 强制刷新UI
+        QApplication.processEvents()
 
-    # 保留原有业务方法（需要适配PyQt6的信号槽机制）
+    def handle_progress(self, increment, total):
+        if total > 0:
+            self.update_progress(0, total)  # 设置最大值
+        else:
+            self.update_progress(increment, 0)  # 增量更新
+
+    def update_progress_bar_color(self, color_name):
+        self.progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                height: 15px;
+                background: white;
+                border: 2px solid gray;
+                border-radius: 5px;
+                text-align: center;
+            }}
+            QProgressBar::chunk {{
+                background-color: {color_name};
+                 background: qlineargradient(
+                x1:0, y1:0, x2:1, y2:0,
+                stop:0 {color_name}, 
+                stop:1 #FFB6C1
+            );
+            margin: 0.5px;  
+                    }}
+        """)
+
     def login_or_out(self):
-        # 需要重写为PyQt6实现...
         pass
 
     def submit_id(self):
-        # 需要重写为PyQt6实现...
-        pass
+        try:
+            self.pause_btn.setText('||')
+            self.update_button_state(False)
+
+            input_uid = self.uid_input.text()
+            if not input_uid:
+                logging.warning('输入不能为空')
+                self.update_ui.emit(True)
+                return
+
+            selected_type = type_config[self.type_group.checkedId()]
+            parts = input_uid.split(f'/{selected_type}/')
+            input_uid = parts[-1].split('/')[0] if parts else input_uid
+            parts = input_uid.split('?')
+            input_uid = parts[0] if parts else input_uid
+
+            if self.space_check.isChecked():
+                url = f"https://www.pixiv.net/{selected_type}/{input_uid}"
+                logging.info(f"正在跳转空间: {url}")
+                webbrowser.open(url)
+
+            self.downloader = ThroughId(input_uid, self, selected_type)
+            self.downloader.progress_update.connect(self.handle_progress)
+
+            self.download_thread = threading.Thread(target=self.downloader.pre_download, daemon=True)
+            self.download_thread.start()
+            self.downloader.finished.connect(lambda path: self.on_download_complete(path))
+
+        except Exception as e:
+            logging.error(f"提交失败: {str(e)}")
+            self.update_button_state(True)
+
+    def toggle_pause(self):
+        if self.downloader:
+            if self.is_paused_btn:
+                self.pause_btn.setText('▶')
+                self.downloader.pause()
+                logging.info("下载已暂停")
+            else:
+                self.pause_btn.setText('||')
+                self.downloader.resume()
+                logging.info("下载继续")
+            self.is_paused_btn = not self.is_paused_btn
+
+    def stop_download(self):
+        if self.downloader:
+            self.downloader.stop_all_tasks()
+            self.downloader = None
+        self.update_button_state(True)
+        logging.info("下载已停止")
 
     def update_type(self, text):
         logging.debug(f"更新内容：{text}")
         if TYPE_WORKER in text:
+            logging.info("类型切换到作品")
             self.type_group.button(0).setChecked(True)
+            self.type_group.button(1).setChecked(False)
         elif TYPE_ARTWORKS in text:
+            logging.info("类型切换到画师")
             self.type_group.button(1).setChecked(True)
+            self.type_group.button(0).setChecked(False)
 
     def connect_signals(self):
         self.login_btn.clicked.connect(self.login_or_out)
         self.submit_btn.clicked.connect(self.submit_id)
+        self.stop_btn.clicked.connect(self.stop_download)
+        self.pause_btn.clicked.connect(self.toggle_pause)
         self.uid_input.textChanged.connect(self.update_type)
-        self.progress_updated.connect(self.update_progress)
+        self.update_ui.connect(self.update_button_state)
         self.qt_handler.log_signal.connect(self.qt_handler.handle_log_message)
 
+    def update_button_state(self, enable):
+        self.submit_btn.setEnabled(enable)
+        self.is_stopped_btn = not enable
+        self.is_paused_btn = not enable
+        self.stop_btn.setEnabled(not enable)
+        self.pause_btn.setEnabled(not enable)
+
+    def on_download_complete(self, save_path):
+        if self.open_check.isChecked() and os.path.exists(save_path):
+            logging.info(f"正在打开下载目录")
+            os.startfile(save_path)
+
+        if self.exit_check.isChecked():
+            logging.info("下载完成，程序即将退出...")
+            time.sleep(3)
+            self.close()
+        self.update_button_state(True)
+
     def closeEvent(self, event):
-        logging.debug("程序已安全退出")
+        logging.debug("正在停止所有下载任务...")
+        if self.download_thread and self.download_thread.is_alive():
+            if self.downloader:
+                self.downloader.stop_all_tasks(timeout=2)
+        if self.downloader:
+            self.downloader.progress_update.disconnect()
+            self.downloader.finished.disconnect()
+        logging.debug("程序已退出")
         event.accept()
 
 
