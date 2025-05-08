@@ -48,7 +48,7 @@ def get_username():
 
 # p站图片下载器
 class PixivDownloader(QObject):
-    progress_update = pyqtSignal(int, int)
+    progress_updated = pyqtSignal(int, int)
     finished = pyqtSignal(str)
 
     def __init__(self, pixiv_app, id):
@@ -103,7 +103,7 @@ class PixivDownloader(QObject):
                 if self.check_status() is False:
                     return
 
-                self.app.progress_updated.emit(1, 0)
+                self.progress_updated.emit(1, 0)
                 return
             except Exception as e:
                 logging.error(f"完整下载失败: {str(e)}")
@@ -119,7 +119,7 @@ class PixivDownloader(QObject):
             if current_size >= end_size:
                 if self.check_status() is False:
                     return
-                self.app.progress_updated.emit(1, 0)
+                self.progress_updated.emit(1, 0)
                 return
         except Exception as e:
             logging.error(f"下载图片时发生错误: {str(e)}")
@@ -151,7 +151,7 @@ class PixivDownloader(QObject):
             with open(save_path, 'rb+') as f:
                 f.seek(0, 0)
                 f.write(resp.content)
-            self.app.progress_updated.emit(1, 0)
+            self.progress_updated.emit(1, 0)
             return
 
         with open(save_path, 'rb+') as f:
@@ -160,7 +160,7 @@ class PixivDownloader(QObject):
             else:
                 f.seek(int(start_size), 0)
             f.write(resp.content)
-        self.app.progress_updated.emit(1, 0)
+        self.progress_updated.emit(1, 0)
 
     def download_images(self, img_ids, t):
         try:
@@ -176,9 +176,9 @@ class PixivDownloader(QObject):
                 self.mkdirs = FileHandler.create_directory("workers_IMG", f'{self.artist}({self.id})')
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = FileHandler.create_directory("artworks_IMG", img_ids[0])
-            self.app.progress_updated.emit(0, len(img_ids))
+            self.progress_updated.emit(0, len(img_ids))
             self.download_by_art_worker_ids(img_ids)
-            self.app.progress_updated.emit(0, len(self.download_queue))
+            self.progress_updated.emit(0, len(self.download_queue))
 
             logging.info(f"检索结束...")
 
@@ -202,12 +202,12 @@ class PixivDownloader(QObject):
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar_color("yellow")
-                self.app.progress_updated.emit(0, len(self.need_com_gif))
+                self.progress_updated.emit(0, len(self.need_com_gif))
                 for img_id in self.need_com_gif:
                     if self.check_status() is False:
                         break
                     self.comp_gif(img_id)
-                    self.app.progress_updated.emit(1, 0)
+                    self.progress_updated.emit(1, 0)
 
             logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
@@ -231,7 +231,13 @@ class PixivDownloader(QObject):
             for l in languages[lang]:
                 name = re.search(f'- (.*?){l}', re_txt)
                 if name:
-                    return name.group(1)
+                    name = name.group(1)
+                    for ll in languages[lang]:
+                        nn = re.search(f'(.*?){ll}', name)
+                        if nn:
+                            name = nn.group(1)
+                            break
+                    return name
         else:
             logging.info("不支持该网站的语言，仅支持简体中文、繁体中文、韩语及日语。")
         logging.warning("未找到该画师,请重新输入~")
@@ -260,7 +266,7 @@ class PixivDownloader(QObject):
 
         if self.check_status() is False:
             return
-        self.app.progress_updated.emit(1, 0)
+        self.progress_updated.emit(1, 0)
 
     def download_static_images(self, img_id):
 
@@ -358,7 +364,7 @@ class PixivDownloader(QObject):
         return True
 
     def __del__(self):
-        self.progress_update.disconnect()
+        self.progress_updated.disconnect()
         self.s.close()
 
 

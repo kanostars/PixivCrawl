@@ -28,7 +28,6 @@ cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 
 class PixivApp(QMainWindow):
-    progress_updated = pyqtSignal(int, int)
     update_ui = pyqtSignal(bool)
 
     def __init__(self, qt_handler=None):
@@ -204,7 +203,7 @@ class PixivApp(QMainWindow):
                 webbrowser.open(url)
 
             self.downloader = ThroughId(input_uid, self, selected_type)
-            self.downloader.progress_update.connect(self.handle_progress)
+            self.downloader.progress_updated.connect(self.handle_progress)
 
             self.download_thread = threading.Thread(target=self.downloader.pre_download, daemon=True)
             self.download_thread.start()
