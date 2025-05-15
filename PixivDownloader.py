@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import sys
 import threading
 import time
 import zipfile
@@ -67,11 +68,12 @@ class PixivDownloader(QObject):
         self.s = requests.Session()
         self.futures = []
         self.lock = threading.Lock()
-
-
-        # 暂停与终止事件
+        self.pause_lock = threading.Lock()
         self.is_paused = threading.Event()
         self.is_stopped = threading.Event()
+        if sys.platform == 'win32':  # 添加内存屏障
+            import ctypes
+            ctypes.windll.kernel32.SetProcessWorkingSetSize(-1, 1 << 30, 1 << 31)
 
         # 配置HTTP和HTTPS连接的池和重试策略
         retry_strategy = Retry(
@@ -93,7 +95,7 @@ class PixivDownloader(QObject):
         if start_size == 0 and end_size == 0:
             try:
                 resp = self.s.get(url, headers={'User-Agent': user_agent, 'referer': 'https://www.pixiv.net/'},
-                                  stream=True)
+                                  stream=True, timeout=30)
                 resp.raise_for_status()
                 with open(save_path, 'wb') as f:
                     for chunk in resp.iter_content(chunk_size=8192):
@@ -191,7 +193,7 @@ class PixivDownloader(QObject):
 
             with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
                 for (url, save_path, start_size, end_size) in self.download_queue:
-                    if self.check_status() is False:
+                    if not self.check_status():
                         break
                     logging.debug(f"{url} {save_path} {start_size} {end_size}")
                     f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
@@ -199,7 +201,7 @@ class PixivDownloader(QObject):
             for future in as_completed(self.futures):
                 future.result()
 
-            if len(self.need_com_gif) > 0:
+            if self.check_status() and len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar_color("yellow")
                 self.progress_updated.emit(0, len(self.need_com_gif))
@@ -209,8 +211,9 @@ class PixivDownloader(QObject):
                     self.comp_gif(img_id)
                     self.progress_updated.emit(1, 0)
 
-            logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
-            logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
+            if self.check_status():
+                logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
+                logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             return self.mkdirs
         except IndexError as e:
             logging.warning("未找到该画师,请重新输入~")
@@ -344,28 +347,51 @@ class PixivDownloader(QObject):
             self.is_stopped.set()
             self.download_queue.clear()
             self.need_com_gif.clear()
+
+            for future in self.futures:
+                future.cancel()
+            self.futures = []
+
         self.reset_session()
 
-
     def reset_session(self):
-        logging.info("会话已重置")
-        self.s.close()
-        self.s = requests.Session()
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
-        self.s.mount('http://', adapter)
-        self.s.mount('https://', adapter)
+        try:
+            self.s.close()
+            self.s.adapters.clear()  # 清除所有适配器
+            self.s.cookies.clear()  # 清除cookies
+        except Exception as e:
+            logging.error(f"重置会话失败: {str(e)}")
+        finally:
+            self.s = requests.Session()
+            adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
+            self.s.mount('http://', adapter)
+            self.s.mount('https://', adapter)
 
     def check_status(self):
         if self.is_stopped.is_set():
             logging.debug("检测到停止信号，终止下载")
+            with self.lock:
+                self.download_queue.clear()
+                logging.debug("已清空下载队列")
             return False
         while self.is_paused.is_set():
             time.sleep(1)
         return True
 
+    def pause(self):
+        with self.pause_lock:
+            self.is_paused.set()
+
+    def resume(self):
+        with self.pause_lock:
+            self.is_paused.clear()
+
     def __del__(self):
-        self.progress_updated.disconnect()
-        self.s.close()
+        try:
+            self.progress_updated.disconnect()
+            self.finished.disconnect()
+        except TypeError:
+            pass
 
 
 # 通过输入框获取id并准备下载图片
@@ -390,21 +416,22 @@ class ThroughId(PixivDownloader):
             return []
 
     def pre_download(self):
-        # try:
+        try:
             if self.type == TYPE_ARTWORKS:
                 img_ids = [self.id]
                 log_msg = f"正在通过插画ID({self.id})检索图片..."
             elif self.type == TYPE_WORKER:
                 log_msg = f"正在通过画师ID({self.id})检索图片..."
-                img_ids = self.get_img_ids() or []  # 空列表容错
+                img_ids = self.get_img_ids() or []
             else:
-                logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
-                raise ValueError(f"无效的资源类型: {self.type}")
-
+                logging.critical("Invalid type非法类型~")
+                raise ValueError("Invalid type")
             logging.info(log_msg)
             save_path = self.download_images(img_ids, self.type)
+            if self.check_status():
+                self.finished.emit(save_path)
             return save_path
-        # except Exception as e:
-        #     logging.critical(f"程序内部错误: {e}")
-        #     return None
-
+        except Exception as e:
+            logging.debug(f"程序内部错误: {e}")
+            self.finished.emit(None)
+            return None
