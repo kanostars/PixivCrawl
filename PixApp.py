@@ -22,9 +22,7 @@ type_config = {
     0: TYPE_WORKER,  # 画师配置
     1: TYPE_ARTWORKS  # 插画配置
 }
-
-cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
-
+preCookie = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 class PixivApp(QMainWindow):
     update_ui = pyqtSignal(bool)
@@ -42,6 +40,7 @@ class PixivApp(QMainWindow):
         self.total_progress = 0
         self.current_progress = 0
         self.connect_signals()
+        threading.Thread(target=self.handle_login_cookie, args=(preCookie,), daemon=True).start()
 
     def init_ui(self):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -183,7 +182,7 @@ class PixivApp(QMainWindow):
     def login_or_out(self):
         if self.isLogin:  # 注销
             logging.info("用户请求注销中。。。")
-            FileHandler.update_json("PHPSESSID", "")
+            FileHandler.update_json("")
             self.welcome_label.setText("欢迎，登录可以下载更多图片！")
             self.login_btn.setText("登录")
             self.isLogin = False
@@ -198,20 +197,19 @@ class PixivApp(QMainWindow):
                 self.login_window.destroyed.connect(lambda: setattr(self, 'login_window', None))
                 self.login_window.show()
 
-
     def handle_login_cookie(self, cookie_value: str):
+        if not cookie_value:
+            return
         try:
-            FileHandler.update_json("PHPSESSID", cookie_value)
+            logging.debug(f"接收到登录Cookie: {cookie_value}")
+            FileHandler.update_json(cookie_value)
             username = get_username()
+            logging.debug(f"用户名: {username}")
             if username:
                 self.welcome_label.setText(f"欢迎，{username}！")
                 self.login_btn.setText("注销")
                 self.isLogin = True
                 logging.info(f"登录成功: {username}")
-
-                if hasattr(self, 'login_window'):
-                    self.login_window.close()
-                    del self.login_window
 
                 if self.downloader:
                     self.downloader.reset_session()
@@ -360,10 +358,10 @@ class PixivApp(QMainWindow):
 
 
 if __name__ == '__main__':
-    import warnings
-    from urllib3.exceptions import InsecureRequestWarning
+    # import warnings
+    # from urllib3.exceptions import InsecureRequestWarning
 
-    warnings.filterwarnings("ignore", category=InsecureRequestWarning)
+    # warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
     app = QApplication(sys.argv)
     window = PixivApp()
