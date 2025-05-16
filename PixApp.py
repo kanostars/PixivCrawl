@@ -3,8 +3,8 @@ import sys
 import threading
 import webbrowser
 import os
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
+from PyQt6.QtGui import QFont, QPalette
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox,
@@ -34,21 +34,37 @@ class PixivApp(QMainWindow):
         self.downloader = None
         self.init_ui()
         self.qt_handler = QtLogHandler(self.log_text) if qt_handler is None else qt_handler
+
         self.isLogin = False  # 登录状态
         self.is_paused_btn = False  # 暂停按钮的状态
         self.is_stopped_btn = False  # 停止按钮的状态
         self.total_progress = 0
         self.current_progress = 0
         self.connect_signals()
+        if not logging.getLogger().handlers:
+            log_init(self.qt_handler)
+        else:
+            logging.getLogger().addHandler(self.qt_handler)
         threading.Thread(target=self.handle_login_cookie, args=(preCookie,), daemon=True).start()
 
     def init_ui(self):
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setWindowTitle('pixiv下载器')
         self.setFixedSize(430, 570)
 
         main_widget = QWidget()
-        main_widget.setStyleSheet("color: white;")
+        bg_color = self.palette().color(QPalette.ColorRole.Window).name()
+        text_color = self.palette().color(QPalette.ColorRole.WindowText).name()
+        self.setStyleSheet(f"""
+               QWidget {{
+                   background-color: {bg_color};
+                   color: {text_color};
+               }}
+               QPushButton {{ 
+                   background-color: {self.palette().color(QPalette.ColorRole.Button).name()};
+                   color: {self.palette().color(QPalette.ColorRole.ButtonText).name()};
+               }}
+           """)
+
         self.setCentralWidget(main_widget)
         layout = QVBoxLayout(main_widget)
         layout.setContentsMargins(20, 15, 20, 15)
@@ -214,7 +230,7 @@ class PixivApp(QMainWindow):
                 if self.downloader:
                     self.downloader.reset_session()
             else:
-                logging.warning("获取用户信息失败，请检查Cookie有效性")
+                logging.warning("获取用户信息失败，请检查网络连接或cookie有效性")
 
         except Exception as e:
             logging.error(f"处理登录Cookie时出错: {str(e)}")

@@ -29,6 +29,7 @@ languages = {
 
 def get_username():
     try:
+        logging.info("正在获取用户信息。。。")
         headers = {
             'cookie': cookies,
             'referer': 'https://www.pixiv.net/',
