@@ -1,14 +1,13 @@
 import logging
+import os
 import sys
 import threading
 import webbrowser
-import os
-from PyQt6.QtCore import pyqtSignal, Qt, QTimer, QEvent
-from PyQt6.QtGui import QFont, QPalette
+
+from PyQt6 import uic
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QRadioButton, QCheckBox,
-    QProgressBar, QTextEdit, QButtonGroup
+    QApplication, QMainWindow
 )
 
 from FileOrDirHandler import FileHandler
@@ -22,11 +21,7 @@ type_config = {
     0: TYPE_WORKER,  # 画师配置
     1: TYPE_ARTWORKS  # 插画配置
 }
-
-
-def get_preCookie():
-    return FileHandler.read_json().get("PHPSESSID", "")
-
+preCookie = f'{FileHandler.read_json()["PHPSESSID"]}'
 
 class PixivApp(QMainWindow):
     update_ui = pyqtSignal(bool)
@@ -36,8 +31,9 @@ class PixivApp(QMainWindow):
         self.login_window = None
         self.download_thread = None
         self.downloader = None
-        self.init_ui()
-        self.qt_handler = QtLogHandler(self.log_text) if qt_handler is None else qt_handler
+        self.ui = uic.loadUi('pix_app.ui', self)
+        self.ui.log_text.append('欢迎使用 PIXIV 图片下载器 ！\n登录以下载更多图片，失效时再重新登录。\n')
+        self.qt_handler = QtLogHandler(self.ui.log_text) if qt_handler is None else qt_handler
 
         self.isLogin = False  # 登录状态
         self.is_paused_btn = False  # 暂停按钮的状态
@@ -49,125 +45,17 @@ class PixivApp(QMainWindow):
             log_init(self.qt_handler)
         else:
             logging.getLogger().addHandler(self.qt_handler)
-        self.preCookie = threading.Thread(target=lambda: self.handle_login_cookie(get_preCookie())).start()
-
-    def init_ui(self):
-        self.setWindowTitle('pixiv下载器')
-        self.setFixedSize(430, 570)
-
-        main_widget = QWidget()
-        bg_color = self.palette().color(QPalette.ColorRole.Window).name()
-        text_color = self.palette().color(QPalette.ColorRole.WindowText).name()
-        self.setStyleSheet(f"""
-               QWidget {{
-                   background-color: {bg_color};
-                   color: {text_color};
-               }}
-               QPushButton {{ 
-                   background-color: {self.palette().color(QPalette.ColorRole.Button).name()};
-                   color: {self.palette().color(QPalette.ColorRole.ButtonText).name()};
-               }}
-           """)
-
-        self.setCentralWidget(main_widget)
-        layout = QVBoxLayout(main_widget)
-        layout.setContentsMargins(20, 15, 20, 15)
-
-        # 登录区域
-        login_layout = QHBoxLayout()
-        self.login_btn = QPushButton("登录")
-        self.login_btn.setFixedSize(100, 30)
-        self.welcome_label = QLabel("欢迎，登录可以下载更多图片！")
-        login_layout.addWidget(self.welcome_label)
-        login_layout.addWidget(self.login_btn)
-        layout.addLayout(login_layout)
-
-        # 输入区域
-        input_layout = QHBoxLayout()
-        self.uid_input = QLineEdit()
-        self.uid_input.setStyleSheet("padding: 5px;")
-        self.type_group = QButtonGroup(self)
-        self.artist_radio = QRadioButton("画师")
-        self.artwork_radio = QRadioButton("插画")
-        self.type_group.addButton(self.artist_radio, 0)
-        self.type_group.addButton(self.artwork_radio, 1)
-        self.type_group.button(0).setChecked(True)  # 默认选中画师
-        input_layout.addWidget(QLabel("请输入链接/UID:"))
-        input_layout.addWidget(self.uid_input)
-        input_layout.addWidget(self.artist_radio)
-        input_layout.addWidget(self.artwork_radio)
-        input_layout.setContentsMargins(0, 10, 0, 10)
-
-        layout.addLayout(input_layout)
-
-        # 选项和提交区域
-        options_layout = QHBoxLayout()
-        self.space_check = QCheckBox("跳转空间")
-        self.open_check = QCheckBox("下载后打开")
-        self.exit_check = QCheckBox("下载后退出")
-        self.open_check.setChecked(True)
-        self.submit_btn = QPushButton("提交")
-        self.submit_btn.setStyleSheet("background-color: gray;")
-        self.submit_btn.setFont(QFont("黑体", 15))
-        options_layout.addWidget(self.space_check)
-        options_layout.addWidget(self.exit_check)
-        options_layout.addWidget(self.open_check)
-        options_layout.addWidget(self.submit_btn)
-        options_layout.setContentsMargins(0, 10, 0, 10)
-        layout.addLayout(options_layout)
-
-        # 进度条区域
-        progress_layout = QHBoxLayout()
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet(f"""
-                  QProgressBar {{
-                      height: 15px;
-                      background: white;
-                      border: 2px solid gray;
-                      border-radius: 5px;
-                      text-align: center;
-                  }}
-                  QProgressBar::chunk {{
-                      background-color: lightblue;
-                       background: qlineargradient(
-                      x1:0, y1:0, x2:1, y2:0,
-                      stop:0 lightblue, 
-                      stop:1 #FFB6C1
-                  );
-                  margin: 0.5px;  
-                          }}
-              """)
-
-        self.progress_label = QLabel("0%")
-        self.progress_label.setContentsMargins(10, 0, 0, 0)
-        self.stop_btn = QPushButton("X")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.setStyleSheet("background-color: red;")
-        self.stop_btn.setFixedSize(30, 30)
-        self.pause_btn = QPushButton("||")
-        self.pause_btn.setEnabled(False)
-        self.pause_btn.setFixedSize(30, 30)
-        progress_layout.addWidget(self.progress_label, stretch=10)
-        progress_layout.addWidget(self.progress_bar, stretch=90)
-        progress_layout.addWidget(self.pause_btn, stretch=0)
-        progress_layout.addWidget(self.stop_btn, stretch=0)
-        layout.addLayout(progress_layout)
-
-        # 日志区域
-        self.log_text = QTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.append('欢迎使用 PIXIV 图片下载器 ！\n登录以下载更多图片，失效时再重新登录。\n')
-        layout.addWidget(self.log_text)
+        threading.Thread(target=self.handle_login_cookie, args=(preCookie,), daemon=True).start()
 
     def update_progress(self, increment, total=0):
         if total > 0:
-            self.progress_bar.setMaximum(total)
+            self.ui.progress_bar.setMaximum(total)
             self.current_progress = 0
         else:
             self.current_progress += increment
-        self.progress_bar.setValue(self.current_progress)
-        progress_percent = (self.current_progress / self.progress_bar.maximum()) * 100
-        self.progress_label.setText(f"{progress_percent:.2f}%")
+        self.ui.progress_bar.setValue(self.current_progress)
+        progress_percent = (self.current_progress / self.ui.progress_bar.maximum()) * 100
+        self.ui.progress_label.setText(f"{progress_percent:.2f}%")
         # 强制刷新UI
         QApplication.processEvents()
 
@@ -180,7 +68,7 @@ class PixivApp(QMainWindow):
             self.update_progress(increment, 0)  # 增量更新
 
     def update_progress_bar_color(self, color_name):
-        self.progress_bar.setStyleSheet(f"""
+        self.ui.progress_bar.setStyleSheet(f"""
             QProgressBar {{
                 height: 15px;
                 background: white;
@@ -203,8 +91,8 @@ class PixivApp(QMainWindow):
         if self.isLogin:  # 注销
             logging.info("用户请求注销中。。。")
             FileHandler.update_json("")
-            self.welcome_label.setText("欢迎，登录可以下载更多图片！")
-            self.login_btn.setText("登录")
+            self.ui.welcome_label.setText("欢迎，登录可以下载更多图片！")
+            self.ui.login_btn.setText("登录")
             self.isLogin = False
             logging.info("用户已成功注销")
         else:  # 登录
@@ -222,13 +110,12 @@ class PixivApp(QMainWindow):
             return
         try:
             logging.debug(f"接收到登录Cookie: {cookie_value}")
-            if cookie_value != self.preCookie:
-                FileHandler.update_json(cookie_value)
+            FileHandler.update_json(cookie_value)
             username = get_username()
             logging.debug(f"用户名: {username}")
             if username:
-                self.welcome_label.setText(f"欢迎，{username}！")
-                self.login_btn.setText("注销")
+                self.ui.welcome_label.setText(f"欢迎，{username}！")
+                self.ui.login_btn.setText("注销")
                 self.isLogin = True
                 logging.info(f"登录成功: {username}")
 
@@ -239,14 +126,14 @@ class PixivApp(QMainWindow):
 
         except Exception as e:
             logging.error(f"处理登录Cookie时出错: {str(e)}")
-            self.welcome_label.setText("登录状态异常，请重新登录")
-            self.login_btn.setText("登录")
+            self.ui.welcome_label.setText("登录状态异常，请重新登录")
+            self.ui.login_btn.setText("登录")
             self.isLogin = False
 
     def submit_id(self):
         try:
             self.update_progress(0, 0)
-            self.progress_bar.setStyleSheet(f"""
+            self.ui.progress_bar.setStyleSheet(f"""
                              QProgressBar {{
                                  height: 15px;
                                  background: white;
@@ -269,22 +156,23 @@ class PixivApp(QMainWindow):
                 self.downloader.stop_all_tasks()
                 self.download_thread.join(2)
 
-            self.pause_btn.setText('||')
+            self.ui.pause_btn.setText('||')
             self.update_button_state(False)
 
-            input_uid = self.uid_input.text()
+            input_uid = self.ui.uid_input.text()
             if not input_uid:
                 logging.warning('输入不能为空')
                 self.update_ui.emit(True)
                 return
 
-            selected_type = type_config[self.type_group.checkedId()]
+            # selected_type = type_config[self.type_group.checkedId()]
+            selected_type = type_config[0] if self.ui.type_worker_radio.isChecked() else type_config[1]
             parts = input_uid.split(f'/{selected_type}/')
             input_uid = parts[-1].split('/')[0] if parts else input_uid
             parts = input_uid.split('?')
             input_uid = parts[0] if parts else input_uid
 
-            if self.space_check.isChecked():
+            if self.ui.space_check.isChecked():
                 url = f"https://www.pixiv.net/{selected_type}/{input_uid}"
                 logging.info(f"正在跳转空间: {url}")
                 webbrowser.open(url)
@@ -306,11 +194,11 @@ class PixivApp(QMainWindow):
     def toggle_pause(self):
         if self.downloader:
             if self.is_paused_btn:
-                self.pause_btn.setText('▶')
+                self.ui.pause_btn.setText('▶')
                 self.downloader.pause()
                 logging.info("下载已暂停")
             else:
-                self.pause_btn.setText('||')
+                self.ui.pause_btn.setText('||')
                 self.downloader.resume()
                 logging.info("下载继续")
             self.is_paused_btn = not self.is_paused_btn
@@ -328,26 +216,26 @@ class PixivApp(QMainWindow):
         logging.debug(f"更新内容：{text}")
         if TYPE_WORKER in text:
             logging.info("类型切换到画师")
-            self.type_group.button(0).setChecked(True)
-            self.type_group.button(1).setChecked(False)
+            self.ui.type_worker_radio.setChecked(True)
+            self.ui.type_artwork_radio.setChecked(False)
         elif TYPE_ARTWORKS in text:
             logging.info("类型切换到作品")
-            self.type_group.button(1).setChecked(True)
-            self.type_group.button(0).setChecked(False)
+            self.ui.type_artwork_radio.setChecked(True)
+            self.ui.type_worker_radio.setChecked(False)
 
     def update_button_state(self, enable):
-        self.submit_btn.setEnabled(enable)
+        self.ui.submit_btn.setEnabled(enable)
         self.is_stopped_btn = not enable
         self.is_paused_btn = not enable
-        self.stop_btn.setEnabled(not enable)
-        self.pause_btn.setEnabled(not enable)
+        self.ui.stop_btn.setEnabled(not enable)
+        self.ui.pause_btn.setEnabled(not enable)
 
     def on_download_complete(self, save_path):
-        if self.open_check.isChecked() and os.path.exists(save_path):
+        if self.ui.open_check.isChecked() and os.path.exists(save_path):
             logging.info(f"正在打开下载目录")
             os.startfile(save_path)
 
-        if self.exit_check.isChecked():
+        if self.ui.exit_check.isChecked():
             logging.info("下载完成，程序即将退出...")
             QTimer.singleShot(1000, QApplication.instance().quit)
 
@@ -369,11 +257,11 @@ class PixivApp(QMainWindow):
             QApplication.quit()
 
     def connect_signals(self):
-        self.login_btn.clicked.connect(self.login_or_out)
-        self.submit_btn.clicked.connect(self.submit_id)
-        self.stop_btn.clicked.connect(self.stop_download)
-        self.pause_btn.clicked.connect(self.toggle_pause)
-        self.uid_input.textChanged.connect(self.update_type)
+        self.ui.login_btn.clicked.connect(self.login_or_out)
+        self.ui.submit_btn.clicked.connect(self.submit_id)
+        self.ui.stop_btn.clicked.connect(self.stop_download)
+        self.ui.pause_btn.clicked.connect(self.toggle_pause)
+        self.ui.uid_input.textChanged.connect(self.update_type)
         self.update_ui.connect(self.update_button_state)
         self.qt_handler.log_signal.connect(self.qt_handler.handle_log_message)
 
@@ -381,11 +269,12 @@ class PixivApp(QMainWindow):
 if __name__ == '__main__':
     # import warnings
     # from urllib3.exceptions import InsecureRequestWarning
+
     # warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
     app = QApplication(sys.argv)
     window = PixivApp()
     log_init(window.qt_handler)
 
-    window.show()
+    window.ui.show()
     sys.exit(app.exec())

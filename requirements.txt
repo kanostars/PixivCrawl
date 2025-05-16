@@ -3,3 +3,4 @@ urllib3~=2.3.0
 selenium~=4.31.0
 requests~=2.32.3
 webdriver-manager~=4.0.2
+PyQt6~=6.9.0
