@@ -22,7 +22,11 @@ type_config = {
     0: TYPE_WORKER,  # 画师配置
     1: TYPE_ARTWORKS  # 插画配置
 }
-preCookie = f'{FileHandler.read_json()["PHPSESSID"]}'
+
+
+def get_preCookie():
+    return FileHandler.read_json().get("PHPSESSID", "")
+
 
 class PixivApp(QMainWindow):
     update_ui = pyqtSignal(bool)
@@ -45,7 +49,7 @@ class PixivApp(QMainWindow):
             log_init(self.qt_handler)
         else:
             logging.getLogger().addHandler(self.qt_handler)
-        threading.Thread(target=self.handle_login_cookie, args=(preCookie,), daemon=True).start()
+        self.preCookie = threading.Thread(target=lambda: self.handle_login_cookie(get_preCookie())).start()
 
     def init_ui(self):
         self.setWindowTitle('pixiv下载器')
@@ -218,7 +222,8 @@ class PixivApp(QMainWindow):
             return
         try:
             logging.debug(f"接收到登录Cookie: {cookie_value}")
-            FileHandler.update_json(cookie_value)
+            if cookie_value != self.preCookie:
+                FileHandler.update_json(cookie_value)
             username = get_username()
             logging.debug(f"用户名: {username}")
             if username:
@@ -376,7 +381,6 @@ class PixivApp(QMainWindow):
 if __name__ == '__main__':
     # import warnings
     # from urllib3.exceptions import InsecureRequestWarning
-
     # warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
     app = QApplication(sys.argv)

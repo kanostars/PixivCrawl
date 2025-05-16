@@ -40,7 +40,6 @@ def get_username():
         return username
     except Exception as e:
         logging.debug(f"获取用户名失败: {str(e)}")
-        logging.warning(f"获取用户名失败,请重新登录")
         return None
     except requests.exceptions.Timeout:
         logging.debug("请求超时，请检查网络连接")
