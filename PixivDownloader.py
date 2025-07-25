@@ -33,7 +33,7 @@ def get_username():
             'user-agent': user_agent
         }
         res = requests.get('https://www.pixiv.net/', headers=headers, verify=False, timeout=5)
-        username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', res.text).group(1)
+        username = re.search(r'<div class="sc-254256c2-3 krHrxE">(.*?)</div>', res.text).group(1)
         return username
     except Exception as e:
         logging.debug(f"获取用户名失败: {str(e)}")
