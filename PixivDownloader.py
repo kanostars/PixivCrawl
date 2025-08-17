@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -28,20 +29,45 @@ languages = {
 def get_username():
     try:
         headers = {
-            'cookie': cookies,
-            'referer': 'https://www.pixiv.net/',
-            'user-agent': user_agent
+            'Cookie': cookies,
+            'Referer': 'https://www.pixiv.net/',
+            'User-Agent': user_agent,
         }
-        res = requests.get('https://www.pixiv.net/', headers=headers, verify=False, timeout=5)
-        username = re.search(r'<div class="sc-254256c2-3 krHrxE">(.*?)</div>', res.text).group(1)
-        return username
-    except Exception as e:
-        logging.debug(f"获取用户名失败: {str(e)}")
-        logging.warning(f"获取用户名失败,请重新登录")
-        return None
+
+        response = requests.get(
+            'https://www.pixiv.net/',
+            headers=headers,
+            verify=False
+        )
+
+        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+                          response.text, re.DOTALL)
+        if not match:
+            raise ValueError("未找到页面中的__NEXT_DATA__脚本")
+
+        next_data = json.loads(match.group(1))
+        user_data = json.loads(next_data['props']['pageProps']['serverSerializedPreloadedState'])
+
+        if not (user_data.get('userData') and user_data['userData'].get('self')):
+            raise ValueError("响应中缺少userData或self字段")
+
+        return user_data['userData']['self']['name']
+
     except requests.exceptions.Timeout:
-        logging.debug("请求超时，请检查网络连接")
+        logging.debug("请求超时：请检查网络连接")
         logging.warning("获取用户名超时，请确认网络正常后重试")
+        return None
+    except requests.exceptions.RequestException as e:
+        logging.debug(f"网络请求失败: {str(e)}")
+        logging.warning("获取用户名失败，请检查网络连接后重新登录")
+        return None
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        logging.debug(f"数据解析错误: {type(e).__name__} - {str(e)}")
+        logging.warning("解析用户数据失败，可能网站结构已更新")
+        return None
+    except Exception as e:
+        logging.debug(f"未预期错误: {type(e).__name__} - {str(e)}")
+        logging.warning("获取用户名时发生未知错误")
         return None
 
 
@@ -69,15 +95,16 @@ class PixivDownloader:
         # 配置HTTP和HTTPS连接的池和重试策略
         retry_strategy = Retry(
             total=5,
-            backoff_factor=1,
+            backoff_factor=2,
             status_forcelist=[429, 500, 502, 503, 504],
             allowed_methods=['HEAD', 'GET', 'OPTIONS']
         )
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=retry_strategy)
+        adapter = HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=retry_strategy)
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
+        time.sleep(random.uniform(1, 3))
         if self.check_status() is False:
             return
 
