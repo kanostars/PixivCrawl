@@ -1,13 +1,9 @@
-import ctypes
 import logging
 import os
-import sys
 import argparse
 import threading
 import time
 import webbrowser
-import winreg
-import re
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
 from tkinter import ttk
@@ -17,7 +13,7 @@ import requests
 from urllib3 import disable_warnings
 
 from FileOrDirHandler import FileHandler
-from PixivDownloader import ThroughId, get_username
+from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
 
 from selenium import webdriver
@@ -67,6 +63,14 @@ def log_init():
     # 添加处理器到日志记录器
     logger.addHandler(file_handler)
     logger.addHandler(tkinter_handler)
+
+    # 禁用第三方库的详细日志，避免日志文件过大
+    logging.getLogger('urllib3').setLevel(logging.WARNING)
+    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
+    logging.getLogger('selenium').setLevel(logging.WARNING)
+    logging.getLogger('selenium.webdriver.remote.remote_connection').setLevel(logging.WARNING)
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
 
 
 # 应用界面框
@@ -205,8 +209,9 @@ class PixivApp:
                     if cookie['name'] == 'PHPSESSID':
                         self.cookie = cookie['value']
                         logging.debug(f'用户登录获得的cookie: {self.cookie}')
-                        div_text = driver.find_element(By.CSS_SELECTOR, 'div.jePfsr').get_attribute('outerHTML')
-                        self.username = re.search(r'<div class="sc-4bc73760-3 jePfsr">(.*?)</div>', div_text).group(1)
+
+                        self.username = get_username(driver.page_source)
+
                         logging.info(f"用户{self.username}已登录~")
                         self.welcome.set(f'你好，{self.username}！')
                         self.login_btn_text.set("退出登录")
@@ -234,7 +239,7 @@ class PixivApp:
 
     def is_login_by_name(self):
         logging.info("正在获取用户信息。。。")
-        username = get_username()
+        username = get_username(get_page_content())
         if username:
             self.login_btn_text.set("退出登录")
             self.welcome.set(f"你好，{username}！")
