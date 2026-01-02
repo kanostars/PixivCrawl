@@ -25,32 +25,32 @@ languages = {
     "ko": ["의 일러스트", "의 만화"]
 }
 
+def get_page_content():
+    headers = {
+        'Cookie': cookies,
+        'Referer': 'https://www.pixiv.net/',
+        'User-Agent': user_agent,
+    }
 
-def get_username():
+    return requests.get(
+        'https://www.pixiv.net/',
+        headers=headers,
+        verify=False
+    )
+
+
+def get_username(res):
     try:
-        headers = {
-            'Cookie': cookies,
-            'Referer': 'https://www.pixiv.net/',
-            'User-Agent': user_agent,
-        }
-
-        response = requests.get(
-            'https://www.pixiv.net/',
-            headers=headers,
-            verify=False
-        )
-
+        page_content = res if isinstance(res, str) else res.text
         match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
-                          response.text, re.DOTALL)
+                          page_content, re.DOTALL)
         if not match:
             raise ValueError("未找到页面中的__NEXT_DATA__脚本")
 
         next_data = json.loads(match.group(1))
         user_data = json.loads(next_data['props']['pageProps']['serverSerializedPreloadedState'])
-
         if not (user_data.get('userData') and user_data['userData'].get('self')):
             raise ValueError("响应中缺少userData或self字段")
-
         return user_data['userData']['self']['name']
 
     except requests.exceptions.Timeout:
@@ -63,7 +63,7 @@ def get_username():
         return None
     except (ValueError, KeyError, json.JSONDecodeError) as e:
         logging.debug(f"数据解析错误: {type(e).__name__} - {str(e)}")
-        logging.warning("解析用户数据失败，可能网站结构已更新")
+        logging.warning("解析用户数据失败，请重新登录")
         return None
     except Exception as e:
         logging.debug(f"未预期错误: {type(e).__name__} - {str(e)}")
@@ -92,6 +92,10 @@ class PixivDownloader:
         self.is_paused = threading.Event()
         self.is_stopped = threading.Event()
 
+        # 文件写入锁，防止多线程写入同一文件时数据错乱
+        self.file_locks = {}
+        self.file_locks_lock = threading.Lock()
+
         # 配置HTTP和HTTPS连接的池和重试策略
         retry_strategy = Retry(
             total=5,
@@ -103,10 +107,19 @@ class PixivDownloader:
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
 
+    def get_file_lock(self, save_path):
+        """获取指定文件的锁，确保同一文件的写入操作是线程安全的"""
+        with self.file_locks_lock:
+            if save_path not in self.file_locks:
+                self.file_locks[save_path] = threading.Lock()
+            return self.file_locks[save_path]
+
     def download_and_save_image(self, url, save_path, start_size, end_size):
         time.sleep(random.uniform(1, 3))
         if self.check_status() is False:
             return
+
+        file_lock = self.get_file_lock(save_path)
 
         # 处理完整下载
         if start_size == 0 and end_size == 0:
@@ -114,10 +127,11 @@ class PixivDownloader:
                 resp = self.s.get(url, headers={'User-Agent': user_agent, 'referer': 'https://www.pixiv.net/'},
                                   stream=True)
                 resp.raise_for_status()
-                with open(save_path, 'wb') as f:
-                    for chunk in resp.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
+                with file_lock:
+                    with open(save_path, 'wb') as f:
+                        for chunk in resp.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
 
                 if self.check_status() is False:
                     return
@@ -127,22 +141,6 @@ class PixivDownloader:
             except Exception as e:
                 logging.error(f"完整下载失败: {str(e)}")
                 return
-
-        # 处理分块下载
-        try:
-            if os.path.exists(save_path):
-                current_size = os.path.getsize(save_path)
-            else:
-                current_size = 0
-
-            if current_size >= end_size:
-                if self.check_status() is False:
-                    return
-                self.app.update_progress_bar(1)  # 更新进度条
-                return
-        except Exception as e:
-            logging.error(f"下载图片时发生错误: {str(e)}")
-            return
 
         # 根据起始和结束位置构建HTTP请求的Range头
         byte_range = f'bytes={start_size}-{end_size}'
@@ -166,20 +164,23 @@ class PixivDownloader:
         if self.check_status() is False:
             return
 
-        if type(start_size) == int and length > end_size - start_size + 1:
-            with open(save_path, 'rb+') as f:
-                f.seek(0, 0)
-                f.write(resp.content)
-            self.app.update_progress_bar(1)  # 更新进度条
-            return
+        # 使用文件锁保护写入操作，确保分块按正确位置写入
+        with file_lock:
+            # 服务器不支持Range请求，返回了完整文件
+            if type(start_size) == int and length > end_size - start_size + 1:
+                with open(save_path, 'rb+') as f:
+                    f.seek(0, 0)
+                    f.write(resp.content)
+                self.app.update_progress_bar(1)
+                return
 
-        with open(save_path, 'rb+') as f:
-            if start_size == '':
-                f.seek(0, 0)
-            else:
-                f.seek(int(start_size), 0)
-            f.write(resp.content)
-        self.app.update_progress_bar(1)  # 更新进度条
+            with open(save_path, 'rb+') as f:
+                if start_size == '':
+                    f.seek(0, 0)
+                else:
+                    f.seek(int(start_size), 0)
+                f.write(resp.content)
+        self.app.update_progress_bar(1)
 
     def download_images(self, img_ids, t):
         try:
@@ -209,7 +210,7 @@ class PixivDownloader:
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
             self.app.update_progress_bar_color("green")
 
-            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
+            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 16)) as executor:
                 for (url, save_path, start_size, end_size) in self.download_queue:
                     if self.check_status() is False:
                         break
@@ -258,7 +259,7 @@ class PixivDownloader:
         return None
 
     def download_by_art_worker_ids(self, img_ids):
-        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 64)) as executor:
+        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 16)) as executor:
             for img_id in img_ids:
                 if self.check_status() is False:
                     break
