@@ -71,5 +71,7 @@ class FileHandler:
     @staticmethod
     def sanitize_filename(filename):
         # 移除Windows的非法字符
+        if filename is None:
+            return None
         cleaned = re.sub(r'[\\/*?:"<>|]', "_", filename)
         return cleaned.strip()
