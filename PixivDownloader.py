@@ -19,11 +19,12 @@ TYPE_ARTWORKS = "artworks"  # 类型是插画
 user_agent = FileHandler.read_json()["user_agent"]
 cookies = f'PHPSESSID={FileHandler.read_json()["PHPSESSID"]}'
 languages = {
-    "zh_tw": ["的插畫", "的漫畫"],
-    "zh": ["的插画", "的漫画"],
-    "ja": ["のイラスト", "のマンガ"],
-    "ko": ["의 일러스트", "의 만화"]
+    "zh_tw": ["的插畫", "的漫畫", "的動畫"],
+    "zh": ["的插画", "的漫画", "的动图"],
+    "ja": ["のイラスト", "のマンガ", "のうごイラ"],
+    "ko": ["의 일러스트", "의 만화", "의 우고이라"]
 }
+
 
 def get_page_content():
     headers = {
@@ -71,6 +72,31 @@ def get_username(res):
         return None
 
 
+# 令牌桶限速器，控制每秒最大请求数
+class RateLimiter:
+    def __init__(self, rate_per_second=3):
+        self.rate = rate_per_second
+        self.tokens = rate_per_second
+        self.last_time = time.time()
+        self.lock = threading.Lock()
+
+    def acquire(self):
+        with self.lock:
+            now = time.time()
+            # 补充令牌
+            self.tokens += (now - self.last_time) * self.rate
+            self.tokens = min(self.tokens, self.rate)  # 最多存rate个令牌
+            self.last_time = now
+
+            if self.tokens >= 1:
+                self.tokens -= 1
+                return
+            # 令牌不足，等待
+            wait_time = (1 - self.tokens) / self.rate
+        time.sleep(wait_time)
+        self.acquire()
+
+
 # p站图片下载器
 class PixivDownloader:
     def __init__(self, pixiv_app, id):
@@ -96,12 +122,14 @@ class PixivDownloader:
         self.file_locks = {}
         self.file_locks_lock = threading.Lock()
 
-        # 配置HTTP和HTTPS连接的池和重试策略
+        self.api_limiter = RateLimiter(rate_per_second=4)
+
         retry_strategy = Retry(
             total=5,
-            backoff_factor=2,
+            backoff_factor=5,
             status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=['HEAD', 'GET', 'OPTIONS']
+            allowed_methods=['HEAD', 'GET', 'OPTIONS'],
+            respect_retry_after_header=True
         )
         adapter = HTTPAdapter(pool_connections=32, pool_maxsize=32, max_retries=retry_strategy)
         self.s.mount('http://', adapter)
@@ -115,8 +143,8 @@ class PixivDownloader:
             return self.file_locks[save_path]
 
     def download_and_save_image(self, url, save_path, start_size, end_size):
-        time.sleep(random.uniform(1, 3))
-        if self.check_status() is False:
+        time.sleep(random.uniform(0.5, 1.5))
+        if not self.check_status():
             return
 
         file_lock = self.get_file_lock(save_path)
@@ -133,7 +161,7 @@ class PixivDownloader:
                             if chunk:
                                 f.write(chunk)
 
-                if self.check_status() is False:
+                if not self.check_status():
                     return
 
                 self.app.update_progress_bar(1)
@@ -161,7 +189,7 @@ class PixivDownloader:
             length = 0
         logging.debug(f'start_size：{start_size}  end_size：{end_size}  length：{length}')
 
-        if self.check_status() is False:
+        if not self.check_status():
             return
 
         # 使用文件锁保护写入操作，确保分块按正确位置写入
@@ -210,22 +238,25 @@ class PixivDownloader:
             logging.info(f"正在开始下载... 共{self.numbers}张图片...")
             self.app.update_progress_bar_color("green")
 
-            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 16)) as executor:
+            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 4)) as executor:
                 for (url, save_path, start_size, end_size) in self.download_queue:
-                    if self.check_status() is False:
+                    if not self.check_status():
                         break
                     logging.debug(f"{url} {save_path} {start_size} {end_size}")
                     f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
                     self.futures.append(f)
-            for future in as_completed(self.futures):
-                future.result()
+                for future in as_completed(self.futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logging.error(f"下载任务异常: {e}")
 
             if len(self.need_com_gif) > 0:
                 logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
                 self.app.update_progress_bar_color("yellow")
                 self.app.update_progress_bar(0, len(self.need_com_gif))
                 for img_id in self.need_com_gif:
-                    if self.check_status() is False:
+                    if not self.check_status():
                         break
                     self.comp_gif(img_id)
                     self.app.update_progress_bar(1)
@@ -247,6 +278,7 @@ class PixivDownloader:
             lang = lang[0]
         else:
             return None
+        print(re_txt)
         if lang in languages:
             # 返回画师名字
             for l in languages[lang]:
@@ -259,18 +291,22 @@ class PixivDownloader:
         return None
 
     def download_by_art_worker_ids(self, img_ids):
-        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 16)) as executor:
+        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 6)) as executor:
             for img_id in img_ids:
-                if self.check_status() is False:
+                if not self.check_status():
                     break
                 f = executor.submit(self.download_by_art_worker_id, img_id)
                 self.futures.append(f)
-        for future in as_completed(self.futures):
-            future.result()
+            for future in as_completed(self.futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    logging.error(f"检索任务异常: {e}")
 
     def download_by_art_worker_id(self, img_id):
-        if self.check_status() is False:
+        if not self.check_status():
             return
+        self.api_limiter.acquire()
         ugoira_url = f"https://www.pixiv.net/ajax/illust/{img_id}/ugoira_meta"
         response = self.s.get(url=ugoira_url, headers=self.headers, verify=False)
         data = response.json()
@@ -279,7 +315,7 @@ class PixivDownloader:
         else:  # 是动图
             self.download_gifs(data, img_id)
 
-        if self.check_status() is False:
+        if not self.check_status():
             return
         self.app.update_progress_bar(1)
 
@@ -367,7 +403,15 @@ class PixivDownloader:
         logging.info("会话已重置")
         self.s.close()
         self.s = requests.Session()
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=5)
+
+        # 重新配置重试策略（429由response hook处理）
+        retry_strategy = Retry(
+            total=5,
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=['HEAD', 'GET', 'OPTIONS']
+        )
+        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=retry_strategy)
         self.s.mount('http://', adapter)
         self.s.mount('https://', adapter)
 
@@ -389,12 +433,12 @@ class ThroughId(PixivDownloader):
 
     # 获取用户的所有作品id
     def get_img_ids(self):
-        if self.check_status() is False:
+        if not self.check_status():
             return []
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
         try:
             response = requests.get(id_url, headers=self.headers, verify=False)
-            if self.check_status() is False:
+            if not self.check_status():
                 return []
             return re.findall(r'"(\d+)":null', response.text)
         except requests.exceptions.RequestException:

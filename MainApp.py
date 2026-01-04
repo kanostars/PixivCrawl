@@ -21,7 +21,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.common.by import By
 
 disable_warnings()
 
@@ -63,14 +62,6 @@ def log_init():
     # 添加处理器到日志记录器
     logger.addHandler(file_handler)
     logger.addHandler(tkinter_handler)
-
-    # 禁用第三方库的详细日志，避免日志文件过大
-    logging.getLogger('urllib3').setLevel(logging.WARNING)
-    logging.getLogger('urllib3.connectionpool').setLevel(logging.WARNING)
-    logging.getLogger('selenium').setLevel(logging.WARNING)
-    logging.getLogger('selenium.webdriver.remote.remote_connection').setLevel(logging.WARNING)
-    logging.getLogger('requests').setLevel(logging.WARNING)
-    logging.getLogger('PIL').setLevel(logging.WARNING)
 
 
 # 应用界面框
