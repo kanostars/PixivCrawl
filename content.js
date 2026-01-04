@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Pixiv Download
+// @name         Pixiv Download（已废除）
 // @namespace    http://tampermonkey.net/
 // @version      2.4.2
 // @description  Pixiv下载脚本器，批量下载图片
