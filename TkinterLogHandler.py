@@ -21,6 +21,6 @@ class TkinterLogHandler(logging.Handler):
         log_level = record.levelname  # 获取日志级别
 
         self.text_widget.configure(state='normal')
-        self.text_widget.insert('end', msg + '\n', log_level)  # 使用日志级别作为标签
+        self.text_widget.insert('end', msg + '\n', log_level)
         self.text_widget.see('end')
         self.text_widget.configure(state='disabled')
