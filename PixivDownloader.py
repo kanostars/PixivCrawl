@@ -278,7 +278,6 @@ class PixivDownloader:
             lang = lang[0]
         else:
             return None
-        print(re_txt)
         if lang in languages:
             # 返回画师名字
             for l in languages[lang]:

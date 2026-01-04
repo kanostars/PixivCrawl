@@ -73,7 +73,7 @@ class PixivApp:
         self.root = root_app
         self.root.geometry('430x570+400+50')
         self.root.title('pixiv下载器')
-        img_path = FileHandler.resource_path('img\\92260993.png')
+        img_path = FileHandler.resource_path('img\\cover.png')
         self.root.img = PhotoImage(file=img_path)
         self.log_text = ''
         self.total_progress = 0
