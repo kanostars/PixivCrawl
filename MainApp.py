@@ -12,7 +12,7 @@ from tkinter.ttk import Progressbar
 import requests
 from urllib3 import disable_warnings
 
-from FileOrDirHandler import FileHandler
+from FileOrDirHandler import FileHandlerManager
 from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
 from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies
@@ -42,7 +42,7 @@ def log_init():
     LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
 
     # 创建文件处理器，将日志写入文件
-    mkdirLog = FileHandler.create_directory("log")
+    mkdirLog = FileHandlerManager.create_directory("log")
     file_handler = TimedRotatingFileHandler(os.path.join(mkdirLog, 'my.log'),
                                             when='midnight', interval=1, backupCount=7, encoding='utf-8')
     file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
@@ -67,7 +67,7 @@ class PixivApp:
         self.root = root_app
         self.root.geometry('430x570+400+50')
         self.root.title('pixiv下载器')
-        img_path = FileHandler.resource_path('img\\cover.png')
+        img_path = FileHandlerManager.resource_path('img\\cover.png')
         self.root.img = PhotoImage(file=img_path)
         self.log_text = ''
         self.total_progress = 0
@@ -102,7 +102,7 @@ class PixivApp:
 
     def create_widgets(self):
         # 图片框
-        label_img = Label(self.root, image=self.root.img, width=800, height=200)
+        label_img = Label(self.root, image=self.root.img, width=800, height=100)
         label_img.pack(fill='both')
 
         # 登录
@@ -207,13 +207,13 @@ class PixivApp:
 
                 # 更新cookie
                 if cookie_temp != cookie_json and cookie_temp is not None:
-                    FileHandler.update_json(cookie_temp)
+                    FileHandlerManager.update_json(cookie_temp)
                     logging.debug(f"PHPSESSID已更新为：{cookie_temp}")
 
             else:
                 logging.info(f"已成功退出")
                 self.isLogin = False
-                FileHandler.update_json("")
+                FileHandlerManager.update_json("")
                 self.login_btn_text.set("登录")
                 self.welcome.set("欢迎，登录可以下载更多图片！")
 
@@ -383,7 +383,7 @@ if __name__ == '__main__':
         app.input_var_UID.set(target_id)
         # 更新cookie
         if args.cookie != cookie_json and args.cookie is not None:
-            FileHandler.update_json(args.cookie)
+            FileHandlerManager.update_json(args.cookie)
             logging.debug(f"PHPSESSID已更新为：{args.cookie}")
 
         if is_start_now:

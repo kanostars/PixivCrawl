@@ -5,7 +5,7 @@ import re
 import sys
 
 
-class FileHandler:
+class FileHandlerManager:
 
     # 创建文件夹
     @staticmethod
@@ -29,7 +29,7 @@ class FileHandler:
                 data = json.load(f)
                 if 'PHPSESSID' not in data:
                     data["PHPSESSID"] = ""
-                    FileHandler.update_json('')
+                    FileHandlerManager.update_json('')
                 return data
         except FileNotFoundError:
             logging.info("未找到配置文件，正在创建默认配置文件。")
@@ -68,10 +68,79 @@ class FileHandler:
             base_path = os.path.abspath(".")
         return os.path.join(base_path, relative_path)
 
+    # 移除Windows的非法字符
     @staticmethod
     def sanitize_filename(filename):
-        # 移除Windows的非法字符
         if filename is None:
             return None
         cleaned = re.sub(r'[\\/*?:"<>|]', "_", filename)
         return cleaned.strip()
+
+
+class DownloadHistoryManager:
+    """下载历史记录管理器"""
+
+    def __init__(self, artist_folder):
+        """
+        初始化管理器
+        :param artist_folder: 画师作品文件夹路径
+        """
+        self.artist_folder = artist_folder
+        self.history_file = os.path.join(artist_folder, "install.json")
+        self.history_data = self._load_history()
+
+    def _load_history(self):
+        """加载历史记录，如果文件不存在则返回空结构"""
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, IOError) as e:
+                logging.warning(f"读取下载历史失败: {e}，将创建新记录")
+                return self._create_empty_history()
+        return self._create_empty_history()
+
+    def _create_empty_history(self):
+        """创建空的历史记录结构"""
+        return {
+            "artist_id": "",
+            "artist_name": "",
+            "last_update": "",
+            "downloaded_artworks": [],
+            "total_count": 0
+        }
+
+    def get_downloaded_ids(self):
+        """获取已下载的作品ID集合"""
+        return set(self.history_data.get("downloaded_artworks", []))
+
+    def add_artwork(self, artwork_id):
+        """
+        添加一个已下载的作品ID
+        :param artwork_id: 作品ID
+        """
+        if artwork_id not in self.history_data["downloaded_artworks"]:
+            self.history_data["downloaded_artworks"].append(artwork_id)
+            self.history_data["total_count"] = len(self.history_data["downloaded_artworks"])
+            self._save_history()
+
+    def update_metadata(self, artist_id, artist_name):
+        """
+        更新画师元数据
+        :param artist_id: 画师ID
+        :param artist_name: 画师名称
+        """
+        self.history_data["artist_id"] = artist_id
+        self.history_data["artist_name"] = artist_name
+        self._save_history()
+
+    def _save_history(self):
+        """保存历史记录到文件"""
+        from datetime import datetime
+        self.history_data["last_update"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.history_data, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            logging.error(f"保存下载历史失败: {e}")

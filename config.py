@@ -1,4 +1,4 @@
-from FileOrDirHandler import FileHandler
+from FileOrDirHandler import FileHandlerManager
 
 # 类型常量
 TYPE_WORKER = "users"  # 类型是画师
@@ -11,7 +11,7 @@ type_config = {
 }
 
 # 读取配置
-_config = FileHandler.read_json()
+_config = FileHandlerManager.read_json()
 user_agent = _config["user_agent"]
 cookies = f'PHPSESSID={_config["PHPSESSID"]}'
 

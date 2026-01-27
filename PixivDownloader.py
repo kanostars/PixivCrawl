@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 from PIL import Image
 from requests.adapters import HTTPAdapter
 
-from FileOrDirHandler import FileHandler
+from FileOrDirHandler import FileHandlerManager
 from config import TYPE_WORKER, TYPE_ARTWORKS, user_agent, cookies, languages
 
 
@@ -116,6 +116,8 @@ class PixivDownloader:
 
         self._configure_session_adapter()
 
+        self.history_manager = None
+
     def _configure_session_adapter(self):
         """配置Session的重试策略和连接池"""
         retry_strategy = Retry(
@@ -208,16 +210,36 @@ class PixivDownloader:
         try:
             self.type = t
             self.artist = self.get_worker_name(img_ids[0])
-            self.artist = FileHandler.sanitize_filename(self.artist)
+            self.artist = FileHandlerManager.sanitize_filename(self.artist)
             if self.artist is None:
                 return None
             logging.info(f"画师名字: {self.artist}")
 
             if self.type == TYPE_WORKER:  # 类型是通过画师id
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-                self.mkdirs = FileHandler.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                self.mkdirs = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                
+                # 初始化历史记录管理器
+                from FileOrDirHandler import DownloadHistoryManager
+                self.history_manager = DownloadHistoryManager(self.mkdirs)
+                self.history_manager.update_metadata(self.id, self.artist)
+                
+                # 过滤已下载的作品
+                downloaded_ids = self.history_manager.get_downloaded_ids()
+                original_count = len(img_ids)
+                img_ids = [img_id for img_id in img_ids if img_id not in downloaded_ids]
+                skipped_count = original_count - len(img_ids)
+                
+                if skipped_count > 0:
+                    logging.info(f"检测到已下载 {skipped_count} 个作品，将跳过")
+                
+                if len(img_ids) == 0:
+                    logging.info("所有作品均已下载，无需重复下载")
+                    return self.mkdirs
+                
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
-                self.mkdirs = FileHandler.create_directory("artworks_IMG", img_ids[0])
+                self.mkdirs = FileHandlerManager.create_directory("artworks_IMG", img_ids[0])
+                self.history_manager = None
 
             self.app.update_progress_bar(0, len(img_ids))
             self.download_by_art_worker_ids(img_ids)
@@ -255,7 +277,14 @@ class PixivDownloader:
                     self.comp_gif(img_id)
                     self.app.update_progress_bar(1)
 
-            logging.info(f"下载完成，文件夹内共有{len(os.listdir(self.mkdirs))}张图片~")
+            total_files = len(os.listdir(self.mkdirs))
+            logging.info(f"下载完成，文件夹内共有{total_files}张图片~")
+            
+            if self.type == TYPE_WORKER and hasattr(self, 'history_manager') and self.history_manager:
+                total_downloaded = self.history_manager.history_data["total_count"]
+                newly_downloaded = len(img_ids)
+                logging.info(f"本次新增: {newly_downloaded} 张，历史累计: {total_downloaded} 张")
+            
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             return self.mkdirs
         except IndexError as e:
@@ -310,6 +339,11 @@ class PixivDownloader:
 
         if not self.check_status():
             return
+        
+        # 记录已下载的作品ID
+        if self.type == TYPE_WORKER and hasattr(self, 'history_manager') and self.history_manager:
+            self.history_manager.add_artwork(img_id)
+        
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
@@ -327,7 +361,7 @@ class PixivDownloader:
             url = urls['urls']['original']
             name = os.path.basename(url)
             file_path = os.path.join(self.mkdirs, f"@{self.artist} {name}")
-            FileHandler.touch(file_path)
+            FileHandlerManager.touch(file_path)
             resp = self.s.get(url=url, headers=self.headers, verify=False)
 
             self.add_download_queue(url, file_path, resp)
@@ -337,7 +371,7 @@ class PixivDownloader:
         url = data['body']['originalSrc']  # GIF图像的原始URL
         name = f"@{self.artist} {img_id}.zip"
         file_path = os.path.join(self.mkdirs, name)
-        FileHandler.touch(file_path)
+        FileHandlerManager.touch(file_path)
         self.need_com_gif[img_id] = delays
 
         resp = self.s.get(url, headers=self.headers, verify=False)
