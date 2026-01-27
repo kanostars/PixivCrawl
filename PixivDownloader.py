@@ -13,17 +13,7 @@ from PIL import Image
 from requests.adapters import HTTPAdapter
 
 from FileOrDirHandler import FileHandler
-
-TYPE_WORKER = "users"  # 类型是画师
-TYPE_ARTWORKS = "artworks"  # 类型是插画
-user_agent = FileHandler.read_json()["user_agent"]
-cookies = f'PHPSESSID={FileHandler.read_json()["PHPSESSID"]}'
-languages = {
-    "zh_tw": ["的插畫", "的漫畫", "的動畫"],
-    "zh": ["的插画", "的漫画", "的动图"],
-    "ja": ["のイラスト", "のマンガ", "のうごイラ"],
-    "ko": ["의 일러스트", "의 만화", "의 우고이라"]
-}
+from config import TYPE_WORKER, TYPE_ARTWORKS, user_agent, cookies, languages
 
 
 def get_page_content():
@@ -124,6 +114,10 @@ class PixivDownloader:
 
         self.api_limiter = RateLimiter(rate_per_second=4)
 
+        self._configure_session_adapter()
+
+    def _configure_session_adapter(self):
+        """配置Session的重试策略和连接池"""
         retry_strategy = Retry(
             total=5,
             backoff_factor=5,
@@ -402,17 +396,7 @@ class PixivDownloader:
         logging.info("会话已重置")
         self.s.close()
         self.s = requests.Session()
-
-        # 重新配置重试策略（429由response hook处理）
-        retry_strategy = Retry(
-            total=5,
-            backoff_factor=2,
-            status_forcelist=[429, 500, 502, 503, 504],
-            allowed_methods=['HEAD', 'GET', 'OPTIONS']
-        )
-        adapter = HTTPAdapter(pool_connections=64, pool_maxsize=64, max_retries=retry_strategy)
-        self.s.mount('http://', adapter)
-        self.s.mount('https://', adapter)
+        self._configure_session_adapter()
 
     def check_status(self):
         if self.is_stopped.is_set():

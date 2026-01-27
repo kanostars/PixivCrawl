@@ -15,6 +15,7 @@ from urllib3 import disable_warnings
 from FileOrDirHandler import FileHandler
 from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
+from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -24,14 +25,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 disable_warnings()
 
-TYPE_WORKER = "users"  # 类型是画师
-TYPE_ARTWORKS = "artworks"  # 类型是插画
-type_config = {
-    0: TYPE_WORKER,  # 画师配置
-    1: TYPE_ARTWORKS  # 插画配置
-}
-
-cookie_json = f'{FileHandler.read_json()["PHPSESSID"]}'
+cookie_json = cookies.replace('PHPSESSID=', '')
 
 
 def thread_it(func, *t_args):
