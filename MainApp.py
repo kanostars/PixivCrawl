@@ -8,6 +8,7 @@ import re
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
 from tkinter import ttk
+from tkinter import font as tkFont
 from tkinter.ttk import Progressbar
 
 import requests
@@ -120,6 +121,11 @@ class PixivApp:
         self.login_btn_text = StringVar()
         self.login_btn_text.set("登录")
         self.welcome.set("欢迎，登录可以下载更多图片！")
+        # 创建字体对象
+        self.font_title = tkFont.Font(family='黑体', size=12)
+        self.font_normal = tkFont.Font(family='宋体', size=10)
+        self.font_large = tkFont.Font(family='黑体', size=15)
+        self.font_button = tkFont.Font(family='黑体', size=11)
         # 创建控件
         self.create_widgets()
         self.root.after(100, lambda: thread_it(self.is_login_by_name))
@@ -135,22 +141,22 @@ class PixivApp:
 
         # 登录
         login_frame = LabelFrame(self.root)
-        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=('黑体', 12), command=self.login_or_out,
+        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=self.font_title, command=self.login_or_out,
                            width=15, relief='groove',
                            compound='center')
-        login_welcome = Label(login_frame, textvariable=self.welcome, font=('黑体', 12))
+        login_welcome = Label(login_frame, textvariable=self.welcome, font=self.font_title)
         login_welcome.pack(side='left', padx=5)
         login_btn.pack(side='right')
         login_frame.pack(fill='both', pady=(0, 5))
 
         # 键入uid
         input_frame = LabelFrame(self.root)
-        label_input = Label(input_frame, text='请输入链接/UID:', font=('黑体', 10))
+        label_input = Label(input_frame, text='请输入链接/UID:', font=self.font_normal)
         entry = Entry(input_frame, width=50, relief='flat', textvariable=self.input_var_UID)
-        type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=2, variable=self.type, value=0)
-        type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=2, variable=self.type, value=1)
-        type_btn3 = Radiobutton(input_frame, text='珍藏册', font=('宋体', 10), height=2, variable=self.type, value=2)
-        type_btn4 = Radiobutton(input_frame, text='小说', font=('宋体', 10), height=2, variable=self.type, value=3)
+        type_btn1 = Radiobutton(input_frame, text='画师', font=self.font_normal, height=2, variable=self.type, value=0)
+        type_btn2 = Radiobutton(input_frame, text='插画', font=self.font_normal, height=2, variable=self.type, value=1)
+        type_btn3 = Radiobutton(input_frame, text='珍藏册', font=self.font_normal, height=2, variable=self.type, value=2)
+        type_btn4 = Radiobutton(input_frame, text='小说', font=self.font_normal, height=2, variable=self.type, value=3)
         type_btn4.pack(side='right', padx=0)
         type_btn3.pack(side='right', padx=0)
         type_btn2.pack(side='right', padx=0)
@@ -161,11 +167,11 @@ class PixivApp:
 
         # 跳转空间
         choose_frame = LabelFrame(self.root)
-        goto_btn = Checkbutton(choose_frame, text='跳转空间', font=('黑体', 10),
+        goto_btn = Checkbutton(choose_frame, text='跳转空间', font=self.font_title,
                                height=2, variable=self.is_space_visit)
-        open_btn = Checkbutton(choose_frame, text='下载后打开', font=('黑体', 10),
+        open_btn = Checkbutton(choose_frame, text='下载后打开', font=self.font_title,
                                height=2, variable=self.is_open_dir)
-        quit_btn = Checkbutton(choose_frame, text='下载后退出', font=('黑体', 10),
+        quit_btn = Checkbutton(choose_frame, text='下载后退出', font=self.font_title,
                                height=2, variable=self.is_finish_exit)
         goto_btn.pack(side='left', padx=15)
         quit_btn.pack(side='left', anchor='center', expand=True)
@@ -176,7 +182,7 @@ class PixivApp:
         self.is_finish_exit.set(False)
 
         # 提交按钮
-        self.button_submit = Button(self.root, text='提交', font=('黑体', 15), relief='groove', compound='center',
+        self.button_submit = Button(self.root, text='提交', font=self.font_large, relief='groove', compound='center',
                                     bg='lavender', height=2, command=lambda: thread_it(self.submit_id))
         self.button_submit.pack(fill='both', anchor="n")
 
@@ -189,9 +195,9 @@ class PixivApp:
                                         length=550, style="Custom.Horizontal.TProgressbar")
         self.progress_bar.config()
         self.process_text = Label(process_frame, text='0%')
-        self.btn_stop = Button(process_frame, text=' X ', font=('黑体', 11), background="red", foreground="white",
+        self.btn_stop = Button(process_frame, text=' X ', font=self.font_button, background="red", foreground="white",
                                command=lambda: thread_it(self.stop_download))
-        self.btn_pause = Button(process_frame, text=' ▶ ', font=('黑体', 11),
+        self.btn_pause = Button(process_frame, text=' ▶ ', font=self.font_button,
                                 command=lambda: thread_it(self.toggle_pause))
         self.btn_stop.config(state='disabled')
         self.btn_pause.config(state='disabled')

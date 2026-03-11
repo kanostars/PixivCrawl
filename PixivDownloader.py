@@ -299,7 +299,7 @@ class PixivDownloader:
 
             logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             return self.mkdirs
-        except IndexError as e:
+        except IndexError:
             logging.warning("未找到该画师,请重新输入~")
             return None
 
