@@ -16,7 +16,7 @@ from urllib3 import disable_warnings
 from FileOrDirHandler import FileHandlerManager
 from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
-from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies, TYPE_COLLECTION
+from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies, TYPE_COLLECTION, TYPE_NOVEL
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -35,10 +35,15 @@ def extract_id_from_url(input_text, type_name):
     if input_text.isdigit():
         return input_text
 
+    # 特殊处理小说
+    if 'novel/show.php' in input_text:
+        id_match = re.search(r'[?&]id=(\d+)', input_text)
+        if id_match:
+            return id_match.group(1)
+
     # 构建正则表达式，匹配 /type_name/数字
     pattern = rf'/{re.escape(type_name)}/(\d+)'
     match = re.search(pattern, input_text)
-
     if match:
         return match.group(1)
 
@@ -110,7 +115,7 @@ class PixivApp:
         self.is_space_visit = BooleanVar()  # 是否查看画师主页
         self.is_finish_exit = BooleanVar()  # 是否下载完退出
         self.is_open_dir = BooleanVar()  # 是否下载完打开目录
-        self.type = IntVar()  # 画师类型  0: 画师  1: 插画  2：珍藏册
+        self.type = IntVar()  # 画师类型  0: 画师  1: 插画  2：珍藏册 3:小说
         self.welcome = StringVar()  # 欢迎语
         self.login_btn_text = StringVar()
         self.login_btn_text.set("登录")
@@ -145,6 +150,8 @@ class PixivApp:
         type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=2, variable=self.type, value=0)
         type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=2, variable=self.type, value=1)
         type_btn3 = Radiobutton(input_frame, text='珍藏册', font=('宋体', 10), height=2, variable=self.type, value=2)
+        type_btn4 = Radiobutton(input_frame, text='小说', font=('宋体', 10), height=2, variable=self.type, value=3)
+        type_btn4.pack(side='right', padx=0)
         type_btn3.pack(side='right', padx=0)
         type_btn2.pack(side='right', padx=0)
         type_btn1.pack(side='right', padx=0)
@@ -275,7 +282,7 @@ class PixivApp:
 
             input_UID = self.input_var_UID.get().strip()
             if input_UID == '':
-                logging.warning('输入的画师id不能为空~~')
+                logging.warning('输入的内容不能为空~~')
                 return
             type = type_config[self.type.get()]
 
@@ -315,6 +322,8 @@ class PixivApp:
             self.type.set(1)
         elif TYPE_COLLECTION in input_text:
             self.type.set(2)
+        elif TYPE_NOVEL in input_text:
+            self.type.set(3)
 
     # 更新进度条
     def update_progress_bar(self, increment, total=0):

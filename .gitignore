@@ -166,6 +166,11 @@ pixivCrawl.json
 /artworks_IMG/*
 /workers_IMG
 /workers_IMG/*
+/collections_IMG
+/collections_IMG/*
+/novels
+/novels/*
+
 
 /log
 /log/*

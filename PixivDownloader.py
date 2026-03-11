@@ -13,7 +13,7 @@ from PIL import Image
 from requests.adapters import HTTPAdapter
 
 from FileOrDirHandler import FileHandlerManager
-from config import TYPE_WORKER, TYPE_ARTWORKS, user_agent, cookies, languages, TYPE_COLLECTION
+from config import TYPE_WORKER, TYPE_ARTWORKS, user_agent, cookies, languages, TYPE_COLLECTION, TYPE_NOVEL
 
 
 def get_page_content():
@@ -87,7 +87,7 @@ class RateLimiter:
         self.acquire()
 
 
-# p站图片下载器
+# p站资源下载器
 class PixivDownloader:
     def __init__(self, pixiv_app, id):
         self.app = pixiv_app
@@ -206,18 +206,19 @@ class PixivDownloader:
                 f.write(resp.content)
         self.app.update_progress_bar(1)
 
-    def download_images(self, img_ids, t):
+    def download_resources(self, img_ids, t):
         try:
             self.type = t
-            # 只在非收藏册类型时获取画师名字
-            if self.type != TYPE_COLLECTION:
+
+            # 只在非收藏册类型和非小说时获取画师名字
+            if self.type != TYPE_COLLECTION and self.type != TYPE_NOVEL:
                 self.artist = self.get_worker_name(img_ids[0])
                 self.artist = FileHandlerManager.sanitize_filename(self.artist)
                 if self.artist is None:
                     return None
                 logging.info(f"画师名字: {self.artist}")
             else:
-                self.artist = ""  # 收藏册类型不需要画师名字
+                self.artist = ""  # 其他类型不需要画师名字
 
             if self.type == TYPE_WORKER:  # 类型是通过画师id
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
@@ -240,52 +241,56 @@ class PixivDownloader:
                 if len(img_ids) == 0:
                     logging.info("所有作品均已下载，无需重复下载")
                     return self.mkdirs
-
             elif self.type == TYPE_ARTWORKS:  # 类型是通过插画id
                 self.mkdirs = FileHandlerManager.create_directory("artworks_IMG", img_ids[0])
                 self.history_manager = None
             elif self.type == TYPE_COLLECTION:  # 类型是通过收藏册id
                 self.mkdirs = FileHandlerManager.create_directory("collections_IMG", self.id)
                 self.history_manager = None
+            elif self.type == TYPE_NOVEL:  # 如果类型是小说，则调用下载小说的逻辑
+                self.mkdirs = FileHandlerManager.create_directory("novels")
+                self.download_novel(img_ids)
+                self.history_manager = None
 
-            self.app.update_progress_bar(0, len(img_ids))
-            self.download_by_art_worker_ids(img_ids)
-            self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
+            if self.type != TYPE_NOVEL:
+                self.app.update_progress_bar(0, len(img_ids))
+                self.download_by_art_worker_ids(img_ids)
+                self.app.update_progress_bar(0, len(self.download_queue))  # 初始化进度条
 
-            logging.info(f"检索结束...")
+                logging.info(f"检索结束...")
 
-            if self.numbers == 0:
-                logging.warning("PHPSESSID已失效，请重新填写!")
-                return None
+                if self.numbers == 0:
+                    logging.warning("PHPSESSID已失效，请重新填写!")
+                    return None
 
-            logging.info(f"正在开始下载... 共{self.numbers}张图片...")
-            self.app.update_progress_bar_color("green")
+                logging.info(f"正在开始下载... 共{self.numbers}张图片...")
+                self.app.update_progress_bar_color("green")
 
-            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 4)) as executor:
-                for (url, save_path, start_size, end_size) in self.download_queue:
-                    if not self.check_status():
-                        break
-                    logging.debug(f"{url} {save_path} {start_size} {end_size}")
-                    f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
-                    self.futures.append(f)
-                for future in as_completed(self.futures):
-                    try:
-                        future.result()
-                    except Exception as e:
-                        logging.error(f"下载任务异常: {e}")
+                with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 4)) as executor:
+                    for (url, save_path, start_size, end_size) in self.download_queue:
+                        if not self.check_status():
+                            break
+                        logging.debug(f"{url} {save_path} {start_size} {end_size}")
+                        f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
+                        self.futures.append(f)
+                    for future in as_completed(self.futures):
+                        try:
+                            future.result()
+                        except Exception as e:
+                            logging.error(f"下载任务异常: {e}")
 
-            if len(self.need_com_gif) > 0:
-                logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
-                self.app.update_progress_bar_color("yellow")
-                self.app.update_progress_bar(0, len(self.need_com_gif))
-                for img_id in self.need_com_gif:
-                    if not self.check_status():
-                        break
-                    self.comp_gif(img_id)
-                    self.app.update_progress_bar(1)
+                if len(self.need_com_gif) > 0:
+                    logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
+                    self.app.update_progress_bar_color("yellow")
+                    self.app.update_progress_bar(0, len(self.need_com_gif))
+                    for img_id in self.need_com_gif:
+                        if not self.check_status():
+                            break
+                        self.comp_gif(img_id)
+                        self.app.update_progress_bar(1)
 
-            total_files = len(os.listdir(self.mkdirs))
-            logging.info(f"下载完成，文件夹内共有{total_files}张图片~")
+                total_files = len(os.listdir(self.mkdirs))
+                logging.info(f"下载完成，文件夹内共有{total_files}张图片~")
 
             if self.type == TYPE_WORKER and hasattr(self, 'history_manager') and self.history_manager:
                 total_downloaded = self.history_manager.history_data["total_count"]
@@ -354,7 +359,6 @@ class PixivDownloader:
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
-
         response = self.s.get(url=f"https://www.pixiv.net/ajax/illust/{img_id}/pages", headers=self.headers,
                               verify=False)
         try:
@@ -391,6 +395,19 @@ class PixivDownloader:
 
         resp = self.s.get(url, headers=self.headers, verify=False)
         self.add_download_queue(url, file_path, resp)
+
+    def download_novel(self, ids):
+        for id in ids:
+            response = self.s.get(url=f"https://www.pixiv.net/ajax/novel/{id}?lang=zh", headers=self.headers,
+                                  verify=False)
+            datas = response.json()['body']
+            title = datas['title']
+            username = datas['userName']
+            content = datas['content']
+
+            with open(os.path.join(self.mkdirs, f"《{title}》- {username}.txt"), 'w', encoding='utf-8') as f:
+                f.write(content)
+            logging.info(f'文章：《{title}》下载完毕。')
 
     def add_download_queue(self, url, file_path, response):
         self.numbers += 1
@@ -479,9 +496,7 @@ class ThroughId(PixivDownloader):
                 return []
             illusts_data = json.loads(response.text)['body']['illusts']
             return list(illusts_data.keys())
-        except requests.exceptions.RequestException:
-            return []
-        except AttributeError:
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
             return []
 
     # 获取收藏册中的作品id
@@ -494,9 +509,7 @@ class ThroughId(PixivDownloader):
             if not self.check_status():
                 return []
             return [data['id'] for data in response.json()['body']['thumbnails']['illust']]
-        except requests.exceptions.RequestException:
-            return []
-        except AttributeError:
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
             return []
 
     def pre_download(self):
@@ -515,8 +528,11 @@ class ThroughId(PixivDownloader):
             if not isinstance(img_ids, list):
                 logging.critical("程序内部错误，必须返回列表类型")
                 raise ValueError("必须返回列表类型")
+        elif self.type == TYPE_NOVEL:
+            log_msg = f"正在下载小说,id为：{self.id}"
+            img_ids = [self.id]
         else:
             logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
             raise ValueError(f"无效的资源类型: {self.type}")
         logging.info(log_msg)
-        return self.download_images(img_ids, self.type)
+        return self.download_resources(img_ids, self.type)
