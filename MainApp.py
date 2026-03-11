@@ -4,6 +4,7 @@ import argparse
 import threading
 import time
 import webbrowser
+import re
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
 from tkinter import ttk
@@ -15,7 +16,7 @@ from urllib3 import disable_warnings
 from FileOrDirHandler import FileHandlerManager
 from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
-from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies
+from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies, TYPE_COLLECTION
 
 from selenium import webdriver
 from selenium.webdriver.support.ui import WebDriverWait
@@ -26,6 +27,28 @@ from webdriver_manager.chrome import ChromeDriverManager
 disable_warnings()
 
 cookie_json = cookies.replace('PHPSESSID=', '')
+
+
+# 提取ID的辅助方法
+def extract_id_from_url(input_text, type_name):
+    # 如果是纯数字，直接返回
+    if input_text.isdigit():
+        return input_text
+
+    # 构建正则表达式，匹配 /type_name/数字
+    pattern = rf'/{re.escape(type_name)}/(\d+)'
+    match = re.search(pattern, input_text)
+
+    if match:
+        return match.group(1)
+
+    # 如果没有匹配到，尝试提取URL中的任何数字ID（作为后备）
+    clean_url = re.split(r'[?#]', input_text)[0]
+    id_match = re.search(r'/(\d+)(?:/|$)', clean_url)
+    if id_match:
+        return id_match.group(1)
+
+    return input_text
 
 
 def thread_it(func, *t_args):
@@ -65,7 +88,7 @@ class PixivApp:
         self.is_stopped_btn = False
         self.is_paused_btn = False
         self.root = root_app
-        self.root.geometry('430x570+400+50')
+        self.root.geometry('450x550+400+50')
         self.root.title('pixiv下载器')
         img_path = FileHandlerManager.resource_path('img\\cover.png')
         self.root.img = PhotoImage(file=img_path)
@@ -87,7 +110,7 @@ class PixivApp:
         self.is_space_visit = BooleanVar()  # 是否查看画师主页
         self.is_finish_exit = BooleanVar()  # 是否下载完退出
         self.is_open_dir = BooleanVar()  # 是否下载完打开目录
-        self.type = IntVar()  # 画师类型  0: 画师  1: 插画
+        self.type = IntVar()  # 画师类型  0: 画师  1: 插画  2：珍藏册
         self.welcome = StringVar()  # 欢迎语
         self.login_btn_text = StringVar()
         self.login_btn_text.set("登录")
@@ -98,11 +121,11 @@ class PixivApp:
         # 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         # 锁定窗口大小
-        # self.root.resizable(False, False)
+        self.root.resizable(False, False)
 
     def create_widgets(self):
         # 图片框
-        label_img = Label(self.root, image=self.root.img, width=800, height=100)
+        label_img = Label(self.root, image=self.root.img, width=800, height=120, bg='#f5f5f5')
         label_img.pack(fill='both')
 
         # 登录
@@ -121,8 +144,10 @@ class PixivApp:
         entry = Entry(input_frame, width=50, relief='flat', textvariable=self.input_var_UID)
         type_btn1 = Radiobutton(input_frame, text='画师', font=('宋体', 10), height=2, variable=self.type, value=0)
         type_btn2 = Radiobutton(input_frame, text='插画', font=('宋体', 10), height=2, variable=self.type, value=1)
-        type_btn2.pack(side='right', padx=5)
-        type_btn1.pack(side='right', padx=5)
+        type_btn3 = Radiobutton(input_frame, text='珍藏册', font=('宋体', 10), height=2, variable=self.type, value=2)
+        type_btn3.pack(side='right', padx=0)
+        type_btn2.pack(side='right', padx=0)
+        type_btn1.pack(side='right', padx=0)
         label_input.pack(side='left')
         entry.pack(side='left', fill='both')
         input_frame.pack(fill='both', pady=(0, 5))
@@ -248,17 +273,14 @@ class PixivApp:
             self.btn_stop.config(state=NORMAL)
             self.btn_pause.config(state=NORMAL)
 
-            input_UID = self.input_var_UID.get()
+            input_UID = self.input_var_UID.get().strip()
             if input_UID == '':
                 logging.warning('输入的画师id不能为空~~')
                 return
-
             type = type_config[self.type.get()]
 
-            parts = input_UID.split(f'/{type}/')
-            input_UID = parts[-1].split('/')[0] if parts else input_UID
-            parts = input_UID.split('?')
-            input_UID = parts[0] if parts else input_UID
+            input_UID = extract_id_from_url(input_UID, type)
+            logging.debug(f"提取到的ID: {input_UID}")
 
             if self.is_space_visit.get():
                 logging.info(f"正在跳转空间,{self.input_var_UID.get()}")
@@ -291,6 +313,8 @@ class PixivApp:
             self.type.set(0)
         elif TYPE_ARTWORKS in input_text:
             self.type.set(1)
+        elif TYPE_COLLECTION in input_text:
+            self.type.set(2)
 
     # 更新进度条
     def update_progress_bar(self, increment, total=0):

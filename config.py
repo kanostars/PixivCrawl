@@ -3,11 +3,13 @@ from FileOrDirHandler import FileHandlerManager
 # 类型常量
 TYPE_WORKER = "users"  # 类型是画师
 TYPE_ARTWORKS = "artworks"  # 类型是插画
+TYPE_COLLECTION = "collection"
 
 # 类型配置映射
 type_config = {
     0: TYPE_WORKER,  # 画师配置
-    1: TYPE_ARTWORKS  # 插画配置
+    1: TYPE_ARTWORKS,  # 插画配置
+    2: TYPE_COLLECTION  # 收藏册配置
 }
 
 # 读取配置
