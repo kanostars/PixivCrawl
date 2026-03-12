@@ -94,7 +94,7 @@ class PixivApp:
         self.is_stopped_btn = False
         self.is_paused_btn = False
         self.root = root_app
-        self.root.geometry('450x550+400+50')
+        self.root.geometry('450x570+400+50')
         self.root.title('pixiv下载器')
         img_path = FileHandlerManager.resource_path('img\\cover.png')
         self.root.img = PhotoImage(file=img_path)
@@ -117,12 +117,17 @@ class PixivApp:
         self.is_finish_exit = BooleanVar()  # 是否下载完退出
         self.is_open_dir = BooleanVar()  # 是否下载完打开目录
         self.type = IntVar()  # 画师类型  0: 画师  1: 插画  2：珍藏册 3:小说
+        # 新的下载类型选择变量
+        self.is_worker_selected = BooleanVar()  # 是否选择画师
+        self.is_artwork_selected = BooleanVar()  # 是否选择插画
+        self.is_collection_selected = BooleanVar()  # 是否选择珍藏册
+        self.is_novel_selected = BooleanVar()  # 是否选择小说
         self.welcome = StringVar()  # 欢迎语
         self.login_btn_text = StringVar()
         self.login_btn_text.set("登录")
         self.welcome.set("欢迎，登录可以下载更多图片！")
         # 创建字体对象
-        self.font_title = tkFont.Font(family='黑体', size=12)
+        self.font_title = tkFont.Font(family='黑体', size=11)
         self.font_normal = tkFont.Font(family='宋体', size=10)
         self.font_large = tkFont.Font(family='黑体', size=15)
         self.font_button = tkFont.Font(family='黑体', size=11)
@@ -141,7 +146,8 @@ class PixivApp:
 
         # 登录
         login_frame = LabelFrame(self.root)
-        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=self.font_title, command=self.login_or_out,
+        login_btn = Button(login_frame, textvariable=self.login_btn_text, font=self.font_title,
+                           command=self.login_or_out,
                            width=15, relief='groove',
                            compound='center')
         login_welcome = Label(login_frame, textvariable=self.welcome, font=self.font_title)
@@ -153,26 +159,40 @@ class PixivApp:
         input_frame = LabelFrame(self.root)
         label_input = Label(input_frame, text='请输入链接/UID:', font=self.font_normal)
         entry = Entry(input_frame, width=50, relief='flat', textvariable=self.input_var_UID)
-        type_btn1 = Radiobutton(input_frame, text='画师', font=self.font_normal, height=2, variable=self.type, value=0)
-        type_btn2 = Radiobutton(input_frame, text='插画', font=self.font_normal, height=2, variable=self.type, value=1)
-        type_btn3 = Radiobutton(input_frame, text='珍藏册', font=self.font_normal, height=2, variable=self.type, value=2)
-        type_btn4 = Radiobutton(input_frame, text='小说', font=self.font_normal, height=2, variable=self.type, value=3)
-        type_btn4.pack(side='right', padx=0)
-        type_btn3.pack(side='right', padx=0)
-        type_btn2.pack(side='right', padx=0)
-        type_btn1.pack(side='right', padx=0)
         label_input.pack(side='left')
         entry.pack(side='left', fill='both')
         input_frame.pack(fill='both', pady=(0, 5))
 
+        # 选择类型
+        type_frame = LabelFrame(self.root)
+        label_type = Label(type_frame, text='下载类型:', font=self.font_normal)
+
+        type_btn1 = Radiobutton(type_frame, text='画师', font=self.font_normal, height=2, variable=self.type, value=0,
+                                command=lambda: logging.info("选择类型：画师"))
+        type_btn2 = Radiobutton(type_frame, text='插画', font=self.font_normal, height=2, variable=self.type, value=1,
+                                command=lambda: logging.info("选择类型：插画"))
+        type_btn3 = Radiobutton(type_frame, text='珍藏册', font=self.font_normal, height=2, variable=self.type,
+                                value=2, command=lambda: logging.info("选择类型：珍藏册"))
+        type_btn4 = Radiobutton(type_frame, text='小说', font=self.font_normal, height=2, variable=self.type, value=3,
+                                command=lambda: logging.info("选择类型：小说"))
+        type_btn4.pack(side='right', padx=10)
+        type_btn3.pack(side='right', padx=10)
+        type_btn2.pack(side='right', padx=10)
+        label_type.pack(side='left')
+        type_btn1.pack(side='left', padx=5)
+        type_frame.pack(fill='both', pady=(0, 5))
+
         # 跳转空间
         choose_frame = LabelFrame(self.root)
         goto_btn = Checkbutton(choose_frame, text='跳转空间', font=self.font_title,
-                               height=2, variable=self.is_space_visit)
+                               height=2, variable=self.is_space_visit,
+                               command=lambda: logging.info(f"跳转空间：{'已选中' if self.is_space_visit.get() else '已取消'}"))
         open_btn = Checkbutton(choose_frame, text='下载后打开', font=self.font_title,
-                               height=2, variable=self.is_open_dir)
+                               height=2, variable=self.is_open_dir,
+                               command=lambda: logging.info(f"下载后打开：{'已选中' if self.is_open_dir.get() else '已取消'}"))
         quit_btn = Checkbutton(choose_frame, text='下载后退出', font=self.font_title,
-                               height=2, variable=self.is_finish_exit)
+                               height=2, variable=self.is_finish_exit,
+                               command=lambda: logging.info(f"下载后退出：{'已选中' if self.is_finish_exit.get() else '已取消'}"))
         goto_btn.pack(side='left', padx=15)
         quit_btn.pack(side='left', anchor='center', expand=True)
         open_btn.pack(side='right', padx=15)
@@ -261,15 +281,21 @@ class PixivApp:
             logging.info("已取消登录")
 
     def is_login_by_name(self):
-        logging.info("正在获取用户信息。。。")
-        username = get_username(get_page_content())
-        if username:
-            self.login_btn_text.set("退出登录")
-            self.welcome.set(f"你好，{username}！")
-            self.isLogin = True
-            logging.info(f'{username}已登录。')
-        else:
-            self.isLogin = False
+        try:
+            logging.info("正在获取用户信息。。。")
+            self.button_submit.config(state=DISABLED)
+            username = get_username(get_page_content())
+            if username:
+                self.login_btn_text.set("退出登录")
+                self.welcome.set(f"你好，{username}！")
+                self.isLogin = True
+                logging.info(f'{username}已登录。')
+            else:
+                self.isLogin = False
+        except requests.exceptions.ConnectionError:
+            logging.warning("网络请求失败，用加速器试试~")
+        finally:
+            self.button_submit.config(state=NORMAL)
 
     # 提交id
     def submit_id(self):

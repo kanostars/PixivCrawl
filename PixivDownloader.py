@@ -112,11 +112,96 @@ class PixivDownloader:
         self.file_locks = {}
         self.file_locks_lock = threading.Lock()
 
+        # 追踪每个作品的下载完成状态
+        self.artwork_download_status = {}  # {artwork_id: {"total": n, "completed": 0}}
+        self.artwork_status_lock = threading.Lock()
+
+        # 追踪文件分块下载状态
+        self.file_chunk_status = {}  # {file_path: {"total_chunks": n, "completed_chunks": set()}}
+        self.file_chunk_lock = threading.Lock()
+
+        # 追踪已完成下载的作品ID
+        self.completed_artworks = []  # 存储已完整下载的作品ID
+        self.completed_artworks_lock = threading.Lock()
+
         self.api_limiter = RateLimiter(rate_per_second=4)
 
         self._configure_session_adapter()
 
         self.history_manager = None
+
+    def _init_artwork_status(self, artwork_id, total_files):
+        """初始化作品的下载状态追踪"""
+        with self.artwork_status_lock:
+            self.artwork_download_status[artwork_id] = {
+                "total": total_files,
+                "completed": 0,
+                "files_completed": set()  # 追踪已完成的文件路径
+            }
+
+    def _mark_file_completed(self, artwork_id, file_path):
+        """标记一个文件下载完成，如果作品所有文件都完成则保存到历史记录"""
+        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+            return
+            
+        with self.artwork_status_lock:
+            if artwork_id in self.artwork_download_status:
+                status = self.artwork_download_status[artwork_id]
+                
+                # 如果这个文件还没有被标记为完成
+                if file_path not in status["files_completed"]:
+                    status["files_completed"].add(file_path)
+                    status["completed"] += 1
+                    
+                    # 检查该作品是否完全下载完成
+                    if status["completed"] >= status["total"]:
+                        # 检查是否是GIF动图（需要合成）
+                        if artwork_id in self.need_com_gif:
+                            # 是GIF动图，标记为等待合成，不立即保存历史记录
+                            status["waiting_for_gif_composition"] = True
+                            logging.debug(f"作品 {artwork_id} ZIP下载完成，等待GIF合成")
+                        else:
+                            # 普通静态图片，直接保存到历史记录
+                            self.history_manager.add_artwork(artwork_id)
+                            logging.debug(f"作品 {artwork_id} 下载完成，已保存到历史记录")
+                            # 清理状态追踪
+                            del self.artwork_download_status[artwork_id]
+
+    def _mark_gif_composition_completed(self, artwork_id):
+        """标记GIF合成完成，保存到历史记录"""
+        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+            return
+            
+        with self.artwork_status_lock:
+            if artwork_id in self.artwork_download_status:
+                status = self.artwork_download_status[artwork_id]
+                if status.get("waiting_for_gif_composition", False):
+                    # GIF合成完成，现在可以保存到历史记录了
+                    self.history_manager.add_artwork(artwork_id)
+                    logging.debug(f"作品 {artwork_id} GIF合成完成，已保存到历史记录")
+                    # 清理状态追踪
+                    del self.artwork_download_status[artwork_id]
+
+    def _check_file_completion(self, artwork_id, file_path, start_size, end_size):
+        """检查文件的分块下载是否完成"""
+        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+            return
+            
+        with self.file_chunk_lock:
+            if file_path not in self.file_chunk_status:
+                return  # 文件状态未初始化，可能是完整下载
+                
+            # 记录这个分块已完成
+            chunk_key = f"{start_size}-{end_size}"
+            self.file_chunk_status[file_path]["completed_chunks"].add(chunk_key)
+            
+            # 检查是否所有分块都完成了
+            status = self.file_chunk_status[file_path]
+            if len(status["completed_chunks"]) >= status["total_chunks"]:
+                # 文件的所有分块都下载完成
+                self._mark_file_completed(artwork_id, file_path)
+                # 清理文件分块状态
+                del self.file_chunk_status[file_path]
 
     def _configure_session_adapter(self):
         """配置Session的重试策略和连接池"""
@@ -138,7 +223,7 @@ class PixivDownloader:
                 self.file_locks[save_path] = threading.Lock()
             return self.file_locks[save_path]
 
-    def download_and_save_image(self, url, save_path, start_size, end_size):
+    def download_and_save_image(self, url, save_path, start_size, end_size, artwork_id=None):
         time.sleep(random.uniform(0.5, 1.5))
         if not self.check_status():
             return
@@ -161,6 +246,8 @@ class PixivDownloader:
                     return
 
                 self.app.update_progress_bar(1)
+                # 完整下载完成，标记文件完成
+                self._mark_file_completed(artwork_id, save_path)
                 return
             except Exception as e:
                 logging.error(f"完整下载失败: {str(e)}")
@@ -196,6 +283,8 @@ class PixivDownloader:
                     f.seek(0, 0)
                     f.write(resp.content)
                 self.app.update_progress_bar(1)
+                # 完整文件下载完成，标记文件完成
+                self._mark_file_completed(artwork_id, save_path)
                 return
 
             with open(save_path, 'rb+') as f:
@@ -204,7 +293,11 @@ class PixivDownloader:
                 else:
                     f.seek(int(start_size), 0)
                 f.write(resp.content)
+        
         self.app.update_progress_bar(1)
+        
+        # 检查是否是该文件的最后一个分块
+        self._check_file_completion(artwork_id, save_path, start_size, end_size)
 
     def download_resources(self, img_ids, t):
         try:
@@ -267,11 +360,11 @@ class PixivDownloader:
                 self.app.update_progress_bar_color("green")
 
                 with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 4)) as executor:
-                    for (url, save_path, start_size, end_size) in self.download_queue:
+                    for (url, save_path, start_size, end_size, artwork_id) in self.download_queue:
                         if not self.check_status():
                             break
-                        logging.debug(f"{url} {save_path} {start_size} {end_size}")
-                        f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size)
+                        logging.debug(f"{url} {save_path} {start_size} {end_size} artwork_id={artwork_id}")
+                        f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size, artwork_id)
                         self.futures.append(f)
                     for future in as_completed(self.futures):
                         try:
@@ -352,10 +445,6 @@ class PixivDownloader:
         if not self.check_status():
             return
 
-        # 记录已下载的作品ID
-        if self.type == TYPE_WORKER and hasattr(self, 'history_manager') and self.history_manager:
-            self.history_manager.add_artwork(img_id)
-
         self.app.update_progress_bar(1)
 
     def download_static_images(self, img_id):
@@ -367,6 +456,10 @@ class PixivDownloader:
             logging.error(f"请求失败，状态码: {response.status_code}")
         # 解析响应以获取所有静态图片的URL
         static_url = json.loads(response.text)['body']
+        
+        # 初始化该作品的下载状态追踪
+        self._init_artwork_status(img_id, len(static_url))
+        
         for urls in static_url:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
@@ -379,7 +472,7 @@ class PixivDownloader:
             FileHandlerManager.touch(file_path)
             resp = self.s.get(url=url, headers=self.headers, verify=False)
 
-            self.add_download_queue(url, file_path, resp)
+            self.add_download_queue(url, file_path, resp, img_id)
 
     def download_gifs(self, data, img_id):
         delays = [frame['delay'] for frame in data['body']['frames']]  # 帧延迟信息
@@ -393,8 +486,11 @@ class PixivDownloader:
         FileHandlerManager.touch(file_path)
         self.need_com_gif[img_id] = delays
 
+        # 初始化该作品的下载状态追踪（动图只有1个文件）
+        self._init_artwork_status(img_id, 1)
+
         resp = self.s.get(url, headers=self.headers, verify=False)
-        self.add_download_queue(url, file_path, resp)
+        self.add_download_queue(url, file_path, resp, img_id)
 
     def download_novel(self, ids):
         for id in ids:
@@ -409,25 +505,37 @@ class PixivDownloader:
                 f.write(content)
             logging.info(f'文章：《{title}》下载完毕。')
 
-    def add_download_queue(self, url, file_path, response):
+    def add_download_queue(self, url, file_path, response, artwork_id=None):
         self.numbers += 1
         try:
             length = int(response.headers.get('Content-Length', 0))
 
             if length == 0:
-                self.download_queue.append((url, file_path, 0, 0))
+                self.download_queue.append((url, file_path, 0, 0, artwork_id))
                 logging.debug(f"未获取到有效文件大小，直接下载整个文件: {url}")
                 return
 
+            # 计算分块数量并初始化文件分块状态
+            chunk_count = 0
             i = 0
             while i < length:
                 end = min(i + self.download_size - 1, length - 1)
-                self.download_queue.append((url, file_path, i, end))
+                self.download_queue.append((url, file_path, i, end, artwork_id))
+                chunk_count += 1
                 i += self.download_size
+            
+            # 初始化文件分块状态追踪
+            if artwork_id and self.type == TYPE_WORKER and self.history_manager:
+                with self.file_chunk_lock:
+                    self.file_chunk_status[file_path] = {
+                        "total_chunks": chunk_count,
+                        "completed_chunks": set()
+                    }
+                    
         except KeyError:
             # 如果无法获取文件大小，则对整个文件不分块下载
             logging.debug(f"无法获取文件大小，将使用整个文件下载,url:{url}")
-            self.download_queue.append((url, file_path, 0, 0))
+            self.download_queue.append((url, file_path, 0, 0, artwork_id))
 
     def comp_gif(self, img_id):
         delays = self.need_com_gif[img_id]
@@ -452,6 +560,9 @@ class PixivDownloader:
                 loop=0
             )
         os.remove(o_file_name)
+        
+        # GIF合成完成，现在可以保存历史记录了
+        self._mark_gif_composition_completed(img_id)
 
     def stop_all_tasks(self):
         logging.info("正在停止所有下载任务...")
