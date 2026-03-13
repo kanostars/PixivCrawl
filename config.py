@@ -1,4 +1,4 @@
-from FileOrDirHandler import FileHandlerManager
+from FileHandlerManager import FileHandlerManager
 
 # 类型常量
 TYPE_WORKER = "users"  # 类型是画师

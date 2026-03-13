@@ -12,7 +12,8 @@ from urllib3.util.retry import Retry
 from PIL import Image
 from requests.adapters import HTTPAdapter
 
-from FileOrDirHandler import FileHandlerManager
+from FileHandlerManager import FileHandlerManager
+from DownloadHistoryManager import DownloadHistoryManager
 from config import TYPE_WORKER, TYPE_ARTWORKS, user_agent, cookies, languages, TYPE_COLLECTION, TYPE_NOVEL
 
 
@@ -141,18 +142,19 @@ class PixivDownloader:
 
     def _mark_file_completed(self, artwork_id, file_path):
         """标记一个文件下载完成，如果作品所有文件都完成则保存到历史记录"""
-        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+        # 画师模式下才记录历史
+        if artwork_id is None or not self.history_manager:
             return
-            
+
         with self.artwork_status_lock:
             if artwork_id in self.artwork_download_status:
                 status = self.artwork_download_status[artwork_id]
-                
+
                 # 如果这个文件还没有被标记为完成
                 if file_path not in status["files_completed"]:
                     status["files_completed"].add(file_path)
                     status["completed"] += 1
-                    
+
                     # 检查该作品是否完全下载完成
                     if status["completed"] >= status["total"]:
                         # 检查是否是GIF动图（需要合成）
@@ -169,9 +171,10 @@ class PixivDownloader:
 
     def _mark_gif_composition_completed(self, artwork_id):
         """标记GIF合成完成，保存到历史记录"""
-        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+        # 画师模式下才记录历史
+        if artwork_id is None or not self.history_manager:
             return
-            
+
         with self.artwork_status_lock:
             if artwork_id in self.artwork_download_status:
                 status = self.artwork_download_status[artwork_id]
@@ -184,17 +187,18 @@ class PixivDownloader:
 
     def _check_file_completion(self, artwork_id, file_path, start_size, end_size):
         """检查文件的分块下载是否完成"""
-        if artwork_id is None or self.type != TYPE_WORKER or not self.history_manager:
+        # 画师模式下才记录历史
+        if artwork_id is None or not self.history_manager:
             return
-            
+
         with self.file_chunk_lock:
             if file_path not in self.file_chunk_status:
                 return  # 文件状态未初始化，可能是完整下载
-                
+
             # 记录这个分块已完成
             chunk_key = f"{start_size}-{end_size}"
             self.file_chunk_status[file_path]["completed_chunks"].add(chunk_key)
-            
+
             # 检查是否所有分块都完成了
             status = self.file_chunk_status[file_path]
             if len(status["completed_chunks"]) >= status["total_chunks"]:
@@ -293,13 +297,13 @@ class PixivDownloader:
                 else:
                     f.seek(int(start_size), 0)
                 f.write(resp.content)
-        
+
         self.app.update_progress_bar(1)
-        
+
         # 检查是否是该文件的最后一个分块
         self._check_file_completion(artwork_id, save_path, start_size, end_size)
 
-    def download_resources(self, img_ids, t):
+    def download_resources(self, img_ids, t, sub_folder=None):
         try:
             self.type = t
 
@@ -313,13 +317,18 @@ class PixivDownloader:
             else:
                 self.artist = ""  # 其他类型不需要画师名字
 
-            if self.type == TYPE_WORKER:  # 类型是通过画师id
+            if self.type == TYPE_WORKER:
                 logging.info(f"正在查找图片总数，图片id集为{len(img_ids)}个...")
-                self.mkdirs = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                # 如果指定了子文件夹，则在画师文件夹下创建子文件夹
+                if sub_folder:
+                    base_dir = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                    self.mkdirs = FileHandlerManager.create_directory(base_dir, sub_folder)
+                else:
+                    self.mkdirs = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
 
-                # 初始化历史记录管理器
-                from FileOrDirHandler import DownloadHistoryManager
-                self.history_manager = DownloadHistoryManager(self.mkdirs)
+                # 初始化历史记录管理器（使用画师根目录）
+                base_dir = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                self.history_manager = DownloadHistoryManager(base_dir)
                 self.history_manager.update_metadata(self.id, self.artist)
 
                 # 过滤已下载的作品
@@ -338,12 +347,24 @@ class PixivDownloader:
                 self.mkdirs = FileHandlerManager.create_directory("artworks_IMG", img_ids[0])
                 self.history_manager = None
             elif self.type == TYPE_COLLECTION:  # 类型是通过收藏册id
-                self.mkdirs = FileHandlerManager.create_directory("collections_IMG", self.id)
-                self.history_manager = None
+                # 如果指定了子文件夹（画师模式），则在画师文件夹下创建珍藏册子文件夹
+                if sub_folder:
+                    self.mkdirs = sub_folder
+                else:
+                    self.mkdirs = FileHandlerManager.create_directory("collections_IMG", self.id)
+                # 画师模式下保留历史记录管理器
+                if not hasattr(self, 'history_manager') or self.history_manager is None:
+                    self.history_manager = None
             elif self.type == TYPE_NOVEL:  # 如果类型是小说，则调用下载小说的逻辑
-                self.mkdirs = FileHandlerManager.create_directory("novels")
+                # 如果指定了子文件夹（画师模式），则在画师文件夹下创建小说子文件夹
+                if sub_folder:
+                    self.mkdirs = sub_folder
+                else:
+                    self.mkdirs = FileHandlerManager.create_directory("novels")
                 self.download_novel(img_ids)
-                self.history_manager = None
+                # 画师模式下保留历史记录管理器
+                if not hasattr(self, 'history_manager') or self.history_manager is None:
+                    self.history_manager = None
 
             if self.type != TYPE_NOVEL:
                 self.app.update_progress_bar(0, len(img_ids))
@@ -364,7 +385,8 @@ class PixivDownloader:
                         if not self.check_status():
                             break
                         logging.debug(f"{url} {save_path} {start_size} {end_size} artwork_id={artwork_id}")
-                        f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size, artwork_id)
+                        f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size,
+                                            artwork_id)
                         self.futures.append(f)
                     for future in as_completed(self.futures):
                         try:
@@ -389,8 +411,6 @@ class PixivDownloader:
                 total_downloaded = self.history_manager.history_data["total_count"]
                 newly_downloaded = len(img_ids)
                 logging.info(f"本次新增: {newly_downloaded} 张，历史累计: {total_downloaded} 张")
-
-            logging.info(f"存放路径：{os.path.abspath(self.mkdirs)}")
             return self.mkdirs
         except IndexError:
             logging.warning("未找到该画师,请重新输入~")
@@ -456,10 +476,10 @@ class PixivDownloader:
             logging.error(f"请求失败，状态码: {response.status_code}")
         # 解析响应以获取所有静态图片的URL
         static_url = json.loads(response.text)['body']
-        
+
         # 初始化该作品的下载状态追踪
         self._init_artwork_status(img_id, len(static_url))
-        
+
         for urls in static_url:
             # 原始分辨率图片的URL
             url = urls['urls']['original']
@@ -492,6 +512,33 @@ class PixivDownloader:
         resp = self.s.get(url, headers=self.headers, verify=False)
         self.add_download_queue(url, file_path, resp, img_id)
 
+    def comp_gif(self, img_id):
+        delays = self.need_com_gif[img_id]
+        # 收藏册类型不需要添加画师名字
+        if self.type == TYPE_COLLECTION:
+            name = f"{img_id}.gif"
+            o_name = f"{img_id}.zip"
+        else:
+            name = f"@{self.artist} {img_id}.gif"
+            o_name = f"@{self.artist} {img_id}.zip"
+        file_path = os.path.join(self.mkdirs, name)
+        o_file_name = os.path.join(self.mkdirs, o_name)
+        with zipfile.ZipFile(o_file_name, 'r') as zip_ref:
+            image_files = [f for f in zip_ref.namelist() if f.endswith(('.png', '.jpg', '.jpeg'))]
+            images = [Image.open(zip_ref.open(image_file)).convert('RGBA') for image_file in image_files]
+        if images:
+            images[0].save(
+                file_path,
+                save_all=True,
+                append_images=images[1:],
+                duration=delays,
+                loop=0
+            )
+        os.remove(o_file_name)
+
+        # GIF合成完成，现在可以保存历史记录了
+        self._mark_gif_composition_completed(img_id)
+
     def download_novel(self, ids):
         for id in ids:
             response = self.s.get(url=f"https://www.pixiv.net/ajax/novel/{id}?lang=zh", headers=self.headers,
@@ -523,46 +570,19 @@ class PixivDownloader:
                 self.download_queue.append((url, file_path, i, end, artwork_id))
                 chunk_count += 1
                 i += self.download_size
-            
-            # 初始化文件分块状态追踪
-            if artwork_id and self.type == TYPE_WORKER and self.history_manager:
+
+            # 初始化文件分块状态追踪（画师模式下）
+            if artwork_id and self.history_manager:
                 with self.file_chunk_lock:
                     self.file_chunk_status[file_path] = {
                         "total_chunks": chunk_count,
                         "completed_chunks": set()
                     }
-                    
+
         except KeyError:
             # 如果无法获取文件大小，则对整个文件不分块下载
             logging.debug(f"无法获取文件大小，将使用整个文件下载,url:{url}")
             self.download_queue.append((url, file_path, 0, 0, artwork_id))
-
-    def comp_gif(self, img_id):
-        delays = self.need_com_gif[img_id]
-        # 收藏册类型不需要添加画师名字
-        if self.type == TYPE_COLLECTION:
-            name = f"{img_id}.gif"
-            o_name = f"{img_id}.zip"
-        else:
-            name = f"@{self.artist} {img_id}.gif"
-            o_name = f"@{self.artist} {img_id}.zip"
-        file_path = os.path.join(self.mkdirs, name)
-        o_file_name = os.path.join(self.mkdirs, o_name)
-        with zipfile.ZipFile(o_file_name, 'r') as zip_ref:
-            image_files = [f for f in zip_ref.namelist() if f.endswith(('.png', '.jpg', '.jpeg'))]
-            images = [Image.open(zip_ref.open(image_file)).convert('RGBA') for image_file in image_files]
-        if images:
-            images[0].save(
-                file_path,
-                save_all=True,
-                append_images=images[1:],
-                duration=delays,
-                loop=0
-            )
-        os.remove(o_file_name)
-        
-        # GIF合成完成，现在可以保存历史记录了
-        self._mark_gif_composition_completed(img_id)
 
     def stop_all_tasks(self):
         logging.info("正在停止所有下载任务...")
@@ -594,21 +614,44 @@ class ThroughId(PixivDownloader):
     def __init__(self, id, pixiv_app, t):
         super().__init__(pixiv_app, id)
         self.id = id
-        self.type = t
+        self.types = t if isinstance(t, list) else [t]  # 支持类型列表
+        self.type = self.types[0] if self.types else ""  # 保持兼容性，主类型
+
+    def pre_download(self):
+        is_worker_mode = TYPE_WORKER in self.types
+
+        if is_worker_mode:
+            # 画师模式：下载画师的多种类型作品
+            logging.info(f"画师模式 - ID: {self.id}")
+            path = self._download_worker_with_types()
+            logging.info("存放路径：" + path)
+            return path
+        else:
+            # 独立作品模式：下载单个作品
+            path = self._download_single_work()
+            logging.info("存放路径：" + path)
+            return path
 
     # 获取用户的所有作品id
     def get_img_ids_user(self):
         if not self.check_status():
-            return []
+            return {}
         id_url = f"https://www.pixiv.net/ajax/user/{self.id}/profile/all?lang=zh"
         try:
             response = requests.get(id_url, headers=self.headers, verify=False)
             if not self.check_status():
-                return []
+                return {}
             illusts_data = json.loads(response.text)['body']['illusts']
-            return list(illusts_data.keys())
+            novels_data = json.loads(response.text)['body']['novels']
+            collections_data = json.loads(response.text)['body']['collections']
+
+            return {
+                "illusts": list(illusts_data.keys()) if illusts_data else [],
+                "novels": list(novels_data.keys()) if novels_data else [],
+                "collections": list(collections_data.keys()) if collections_data else []
+            }
         except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
-            return []
+            return {}
 
     # 获取收藏册中的作品id
     def get_img_ids_collection(self):
@@ -623,27 +666,227 @@ class ThroughId(PixivDownloader):
         except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError):
             return []
 
-    def pre_download(self):
-        if self.type == TYPE_ARTWORKS:
-            img_ids = [self.id]
+    def _download_worker_with_types(self):
+        """画师模式：下载画师的指定类型作品"""
+        # 获取画师的所有作品ID
+        logging.info(f"正在通过画师ID({self.id})检索作品...")
+        all_ids = self.get_img_ids_user()
+
+        if not all_ids:
+            logging.warning("未找到该画师的作品")
+            return None
+
+        # 根据选中的类型过滤作品
+        selected_types = [t for t in self.types if t != TYPE_WORKER]
+
+        # 收集要下载的作品ID
+        illusts_to_download = []
+        novels_to_download = []
+        collections_to_download = []
+        type_names = []
+
+        if TYPE_ARTWORKS in selected_types:
+            illusts = all_ids.get("illusts", [])
+            illusts_to_download = illusts
+            if illusts:
+                type_names.append(f"插画({len(illusts)})")
+                logging.info(f"找到 {len(illusts)} 个插画作品")
+            else:
+                logging.warning("该画师没有插画作品")
+
+        if TYPE_NOVEL in selected_types:
+            novels = all_ids.get("novels", [])
+            novels_to_download = novels
+            if novels:
+                type_names.append(f"小说({len(novels)})")
+                logging.info(f"找到 {len(novels)} 个小说作品")
+            else:
+                logging.warning("该画师没有小说作品")
+
+        if TYPE_COLLECTION in selected_types:
+            collections = all_ids.get("collections", [])
+            collections_to_download = collections
+            if collections:
+                type_names.append(f"珍藏册({len(collections)})")
+                logging.info(f"找到 {len(collections)} 个珍藏册")
+            else:
+                logging.warning("该画师没有珍藏册")
+
+        if not illusts_to_download and not novels_to_download and not collections_to_download:
+            logging.warning("没有找到符合条件的作品")
+            return None
+
+        # 用于存储最终返回的路径
+        final_path = None
+
+        # 下载插画作品
+        if illusts_to_download:
+            logging.info(f"开始下载插画作品...")
+            result_path = self.download_resources(illusts_to_download, TYPE_WORKER, sub_folder="artworks")
+            if result_path:
+                # 返回画师根目录
+                final_path = os.path.dirname(result_path) if os.path.basename(result_path) == "artworks" else result_path
+
+        # 下载珍藏册
+        if collections_to_download:
+            logging.info(f"开始下载珍藏册...")
+            
+            # 获取画师名字（如果还没有）
+            if not self.artist:
+                # 尝试从插画中获取画师名字
+                if illusts_to_download:
+                    self.artist = self.get_worker_name(illusts_to_download[0])
+                else:
+                    # 从珍藏册中获取第一个作品来获取画师名字
+                    first_collection_artworks = self.get_img_ids_collection_by_id(collections_to_download[0])
+                    if first_collection_artworks:
+                        self.artist = self.get_worker_name(first_collection_artworks[0])
+                
+                if self.artist:
+                    self.artist = FileHandlerManager.sanitize_filename(self.artist)
+            
+            if self.artist:
+                base_dir = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                
+                # 初始化历史记录管理器（如果还没有）
+                if not self.history_manager:
+                    self.history_manager = DownloadHistoryManager(base_dir)
+                    self.history_manager.update_metadata(self.id, self.artist)
+                
+                # 为每个珍藏册创建子文件夹并下载
+                for collection_id in collections_to_download:
+                    # 检查是否已下载
+                    if collection_id in self.history_manager.get_downloaded_ids():
+                        logging.info(f"珍藏册 {collection_id} 已下载，跳过")
+                        continue
+                    
+                    # 获取珍藏册中的作品ID
+                    collection_artworks = self.get_img_ids_collection_by_id(collection_id)
+                    if collection_artworks:
+                        collection_folder = FileHandlerManager.create_directory(base_dir, f"collections/{collection_id}")
+                        
+                        # 临时保存当前类型和目录
+                        original_type = self.type
+                        original_mkdirs = self.mkdirs
+                        
+                        # 下载珍藏册中的作品
+                        self.mkdirs = collection_folder
+                        self.type = TYPE_COLLECTION
+                        
+                        # 下载珍藏册中的图片
+                        self.app.update_progress_bar(0, len(collection_artworks))
+                        self.download_by_art_worker_ids(collection_artworks)
+                        self.app.update_progress_bar(0, len(self.download_queue))
+                        
+                        if self.numbers > 0:
+                            logging.info(f"正在下载珍藏册 {collection_id}，共{self.numbers}张图片...")
+                            self.app.update_progress_bar_color("green")
+                            
+                            with ThreadPoolExecutor(max_workers=min(os.cpu_count(), 4)) as executor:
+                                for (url, save_path, start_size, end_size, artwork_id) in self.download_queue:
+                                    if not self.check_status():
+                                        break
+                                    f = executor.submit(self.download_and_save_image, url, save_path, start_size, end_size, None)
+                                    self.futures.append(f)
+                                for future in as_completed(self.futures):
+                                    try:
+                                        future.result()
+                                    except Exception as e:
+                                        logging.error(f"下载任务异常: {e}")
+                            
+                            # 处理动图合成
+                            if len(self.need_com_gif) > 0:
+                                logging.info(f"开始合成动图，数量:{len(self.need_com_gif)}")
+                                self.app.update_progress_bar_color("yellow")
+                                self.app.update_progress_bar(0, len(self.need_com_gif))
+                                for img_id in self.need_com_gif:
+                                    if not self.check_status():
+                                        break
+                                    self.comp_gif(img_id)
+                                    self.app.update_progress_bar(1)
+                        
+                        # 恢复原始类型和目录
+                        self.type = original_type
+                        self.mkdirs = original_mkdirs
+                        
+                        # 记录珍藏册到历史
+                        self.history_manager.add_collection(collection_id)
+                        
+                        # 清空下载队列和动图列表
+                        self.download_queue = []
+                        self.need_com_gif = {}
+                        self.numbers = 0
+                
+                if not final_path:
+                    final_path = base_dir
+
+        # 下载小说
+        if novels_to_download:
+            logging.info(f"开始下载小说...")
+            
+            # 获取画师名字（如果还没有）
+            if not self.artist:
+                if illusts_to_download:
+                    self.artist = self.get_worker_name(illusts_to_download[0])
+                    self.artist = FileHandlerManager.sanitize_filename(self.artist)
+            
+            if self.artist:
+                base_dir = FileHandlerManager.create_directory("workers_IMG", f'{self.artist}({self.id})')
+                
+                # 初始化历史记录管理器（如果还没有）
+                if not self.history_manager:
+                    self.history_manager = DownloadHistoryManager(base_dir)
+                    self.history_manager.update_metadata(self.id, self.artist)
+                
+                # 过滤已下载的小说
+                downloaded_ids = self.history_manager.get_downloaded_ids()
+                novels_to_download = [novel_id for novel_id in novels_to_download if novel_id not in downloaded_ids]
+                
+                if novels_to_download:
+                    novel_folder = FileHandlerManager.create_directory(base_dir, "novels")
+                    self.download_resources(novels_to_download, TYPE_NOVEL, sub_folder=novel_folder)
+                    
+                    # 记录小说到历史
+                    for novel_id in novels_to_download:
+                        self.history_manager.add_novel(novel_id)
+                    
+                    if not final_path:
+                        final_path = base_dir
+                else:
+                    logging.info("所有小说均已下载，无需重复下载")
+
+        return final_path
+
+    def _download_single_work(self):
+        """独立作品模式：下载单个作品"""
+        work_type = self.types[0]
+
+        if work_type == TYPE_ARTWORKS:
             log_msg = f"正在通过插画ID({self.id})检索图片..."
-        elif self.type == TYPE_WORKER:
-            log_msg = f"正在通过画师ID({self.id})检索图片（不包含收藏册）..."
-            img_ids = self.get_img_ids_user() or []
-            if not isinstance(img_ids, list):  # 类型校验
-                logging.critical("程序内部错误，必须返回列表类型")
-                raise ValueError("必须返回列表类型")
-        elif self.type == TYPE_COLLECTION:
-            log_msg = f"正在通过收藏册ID({self.id})检索图片..."
+            img_ids = [self.id]
+        elif work_type == TYPE_COLLECTION:
+            log_msg = f"正在通过珍藏册ID({self.id})检索图片..."
             img_ids = self.get_img_ids_collection() or []
-            if not isinstance(img_ids, list):
-                logging.critical("程序内部错误，必须返回列表类型")
-                raise ValueError("必须返回列表类型")
-        elif self.type == TYPE_NOVEL:
+        elif work_type == TYPE_NOVEL:
             log_msg = f"正在下载小说,id为：{self.id}"
             img_ids = [self.id]
         else:
-            logging.critical(f"程序内部错误，无效的资源类型: {self.type}")
-            raise ValueError(f"无效的资源类型: {self.type}")
+            logging.critical(f"程序内部错误，无效的资源类型: {work_type}")
+            raise ValueError(f"无效的资源类型: {work_type}")
+
         logging.info(log_msg)
-        return self.download_resources(img_ids, self.type)
+        return self.download_resources(img_ids, work_type)
+
+    def get_img_ids_collection_by_id(self, collection_id):
+        """根据珍藏册ID获取其中的作品ID列表"""
+        if not self.check_status():
+            return []
+        id_url = f"https://www.pixiv.net/ajax/collection/{collection_id}?lang=zh"
+        try:
+            response = requests.get(id_url, headers=self.headers, verify=False)
+            if not self.check_status():
+                return []
+            return [data['id'] for data in response.json()['body']['thumbnails']['illust']]
+        except (requests.RequestException, ValueError, KeyError, TypeError, AttributeError) as e:
+            logging.debug(f"获取珍藏册 {collection_id} 失败: {e}")
+            return []

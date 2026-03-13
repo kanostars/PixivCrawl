@@ -1,29 +1,28 @@
+import argparse
 import logging
 import os
-import argparse
+import re
 import threading
 import time
 import webbrowser
-import re
 from logging.handlers import TimedRotatingFileHandler
 from tkinter import *
-from tkinter import ttk
 from tkinter import font as tkFont
+from tkinter import ttk
 from tkinter.ttk import Progressbar
 
 import requests
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from urllib3 import disable_warnings
+from webdriver_manager.chrome import ChromeDriverManager
 
-from FileOrDirHandler import FileHandlerManager
+from FileHandlerManager import FileHandlerManager
 from PixivDownloader import ThroughId, get_username, get_page_content
 from TkinterLogHandler import TkinterLogHandler
-from config import TYPE_WORKER, TYPE_ARTWORKS, type_config, cookies, TYPE_COLLECTION, TYPE_NOVEL
-
-from selenium import webdriver
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from config import TYPE_WORKER, TYPE_ARTWORKS, cookies, TYPE_COLLECTION, TYPE_NOVEL
 
 disable_warnings()
 
@@ -110,13 +109,16 @@ class PixivApp:
         self.btn_stop = None
         self.cookie = None
         self.username = None
+        self.worker_check = None
+        self.novel_check = None
+        self.collection_check = None
+        self.artwork_check = None
         self.progress_bar = {}
         self.input_var_UID = StringVar()  # 接受链接/uid
         self.input_var_UID.trace("w", self.update_content)
         self.is_space_visit = BooleanVar()  # 是否查看画师主页
         self.is_finish_exit = BooleanVar()  # 是否下载完退出
         self.is_open_dir = BooleanVar()  # 是否下载完打开目录
-        self.type = IntVar()  # 画师类型  0: 画师  1: 插画  2：珍藏册 3:小说
         # 新的下载类型选择变量
         self.is_worker_selected = BooleanVar()  # 是否选择画师
         self.is_artwork_selected = BooleanVar()  # 是否选择插画
@@ -166,33 +168,56 @@ class PixivApp:
         # 选择类型
         type_frame = LabelFrame(self.root)
         label_type = Label(type_frame, text='下载类型:', font=self.font_normal)
+        label_type.pack(side='left', padx=5)
 
-        type_btn1 = Radiobutton(type_frame, text='画师', font=self.font_normal, height=2, variable=self.type, value=0,
-                                command=lambda: logging.info("选择类型：画师"))
-        type_btn2 = Radiobutton(type_frame, text='插画', font=self.font_normal, height=2, variable=self.type, value=1,
-                                command=lambda: logging.info("选择类型：插画"))
-        type_btn3 = Radiobutton(type_frame, text='珍藏册', font=self.font_normal, height=2, variable=self.type,
-                                value=2, command=lambda: logging.info("选择类型：珍藏册"))
-        type_btn4 = Radiobutton(type_frame, text='小说', font=self.font_normal, height=2, variable=self.type, value=3,
-                                command=lambda: logging.info("选择类型：小说"))
-        type_btn4.pack(side='right', padx=10)
-        type_btn3.pack(side='right', padx=10)
-        type_btn2.pack(side='right', padx=10)
-        label_type.pack(side='left')
-        type_btn1.pack(side='left', padx=5)
+        # 左边：画师选项
+        left_frame = Frame(type_frame)
+        self.worker_check = Checkbutton(left_frame, text='画师', font=self.font_normal, height=2,
+                                        variable=self.is_worker_selected,
+                                        command=self.on_worker_toggle)
+        self.worker_check.pack(side='left')
+        left_frame.pack(side='left', padx=10)
+
+        # 分隔线
+        separator = Frame(type_frame, width=1, bg='gray', relief='sunken')
+        separator.pack(side='left', fill='y', padx=10)
+
+        # 右边：插画、珍藏册、小说
+        right_frame = Frame(type_frame)
+        self.artwork_check = Checkbutton(right_frame, text='插画', font=self.font_normal, height=2,
+                                         variable=self.is_artwork_selected,
+                                         command=lambda: self.on_right_option_toggle('artwork'))
+        self.collection_check = Checkbutton(right_frame, text='珍藏册', font=self.font_normal, height=2,
+                                            variable=self.is_collection_selected,
+                                            command=lambda: self.on_right_option_toggle('collection'))
+        self.novel_check = Checkbutton(right_frame, text='小说', font=self.font_normal, height=2,
+                                       variable=self.is_novel_selected,
+                                       command=lambda: self.on_right_option_toggle('novel'))
+
+        self.artwork_check.pack(side='left', padx=10)
+        self.collection_check.pack(side='left', padx=10)
+        self.novel_check.pack(side='left', padx=10)
+        right_frame.pack(side='left')
+
         type_frame.pack(fill='both', pady=(0, 5))
+
+        # 默认选中插画（单选模式）
+        self.is_artwork_selected.set(True)
 
         # 跳转空间
         choose_frame = LabelFrame(self.root)
         goto_btn = Checkbutton(choose_frame, text='跳转空间', font=self.font_title,
                                height=2, variable=self.is_space_visit,
-                               command=lambda: logging.info(f"跳转空间：{'已选中' if self.is_space_visit.get() else '已取消'}"))
+                               command=lambda: logging.info(
+                                   f"跳转空间：{'已选中' if self.is_space_visit.get() else '已取消'}"))
         open_btn = Checkbutton(choose_frame, text='下载后打开', font=self.font_title,
                                height=2, variable=self.is_open_dir,
-                               command=lambda: logging.info(f"下载后打开：{'已选中' if self.is_open_dir.get() else '已取消'}"))
+                               command=lambda: logging.info(
+                                   f"下载后打开：{'已选中' if self.is_open_dir.get() else '已取消'}"))
         quit_btn = Checkbutton(choose_frame, text='下载后退出', font=self.font_title,
                                height=2, variable=self.is_finish_exit,
-                               command=lambda: logging.info(f"下载后退出：{'已选中' if self.is_finish_exit.get() else '已取消'}"))
+                               command=lambda: logging.info(
+                                   f"下载后退出：{'已选中' if self.is_finish_exit.get() else '已取消'}"))
         goto_btn.pack(side='left', padx=15)
         quit_btn.pack(side='left', anchor='center', expand=True)
         open_btn.pack(side='right', padx=15)
@@ -231,8 +256,13 @@ class PixivApp:
         self.log_text = Text(self.root, height=10)
         self.log_text.tag_configure("red", foreground="red")
         self.log_text.insert('1.0',  # 插入默认日志信息
-                             '欢迎使用 PIXIV 图片下载器 ！\n'
-                             '登录以下载更多图片，失效时再重新登录。\n')
+                                     '欢迎使用 PIXIV 下载器 ！\n'
+                                     '登录以下载更多资源，失效时再重新登录。\n'
+                                     '==============================================\n'
+                                     '勾选画师时，右侧为画师的作品类型 (按画师 ID)\n'
+                                     '不勾选时，右侧为独立搜索的作品类型 (按作品 ID)\n'
+                                     '==============================================\n'
+                             )
         self.log_text.config(state='disabled')  # 禁用编辑功能
         self.log_text.pack(fill='both', expand=True)
 
@@ -316,16 +346,40 @@ class PixivApp:
             if input_UID == '':
                 logging.warning('输入的内容不能为空~~')
                 return
-            type = type_config[self.type.get()]
 
-            input_UID = extract_id_from_url(input_UID, type)
-            logging.debug(f"提取到的ID: {input_UID}")
+            # 获取选中的下载类型
+            selected_types = self.get_selected_types()
+            is_worker = self.is_worker_selected.get()
+            
+            if is_worker:
+                # 画师模式
+                input_UID = extract_id_from_url(input_UID, TYPE_WORKER)
+                type_names = [t for t in selected_types if t != TYPE_WORKER]
+                type_names_str = ', '.join([
+                    '插画' if t == TYPE_ARTWORKS else 
+                    '珍藏册' if t == TYPE_COLLECTION else 
+                    '小说' for t in type_names
+                ])
+                logging.info(f"画师模式 - ID: {input_UID}, 下载类型: {type_names_str}")
+            else:
+                # 独立作品模式
+                input_UID = extract_id_from_url(input_UID, selected_types[0])
+                type_name = '插画' if selected_types[0] == TYPE_ARTWORKS else \
+                           '珍藏册' if selected_types[0] == TYPE_COLLECTION else '小说'
+                logging.info(f"独立作品模式 - ID: {input_UID}, 类型: {type_name}")
 
+            logging.debug(f"提取到的ID: {input_UID}, 类型列表: {selected_types}")
+
+            # 跳转空间
             if self.is_space_visit.get():
-                logging.info(f"正在跳转空间,{self.input_var_UID.get()}")
-                webbrowser.open(f"https://www.pixiv.net/{type}/{input_UID}")
+                if is_worker:
+                    webbrowser.open(f"https://www.pixiv.net/{TYPE_WORKER}/{input_UID}")
+                    logging.info(f"正在跳转画师空间")
+                else:
+                    webbrowser.open(f"https://www.pixiv.net/{selected_types[0]}/{input_UID}")
+                    logging.info(f"正在跳转作品空间")
 
-            self.downloader = ThroughId(input_UID, app, type)
+            self.downloader = ThroughId(input_UID, app, selected_types)
             already_path = self.downloader.pre_download()
 
             if already_path and self.is_open_dir.get():
@@ -344,18 +398,139 @@ class PixivApp:
             self.btn_stop.config(state=DISABLED)
             self.btn_pause.config(state=DISABLED)
 
+    # 获取当前选中的下载类型列表
+    def get_selected_types(self):
+        is_worker = self.is_worker_selected.get()
+        selected_types = []
+        
+        if is_worker:
+            # 画师模式：收集右侧选中的作品类型
+            selected_types.append(TYPE_WORKER)
+            if self.is_artwork_selected.get():
+                selected_types.append(TYPE_ARTWORKS)
+            if self.is_collection_selected.get():
+                selected_types.append(TYPE_COLLECTION)
+            if self.is_novel_selected.get():
+                selected_types.append(TYPE_NOVEL)
+        else:
+            # 独立作品模式：只选择一个类型
+            if self.is_artwork_selected.get():
+                selected_types.append(TYPE_ARTWORKS)
+            elif self.is_collection_selected.get():
+                selected_types.append(TYPE_COLLECTION)
+            elif self.is_novel_selected.get():
+                selected_types.append(TYPE_NOVEL)
+        
+        return selected_types
+
+    # 画师选项切换事件
+    def on_worker_toggle(self):
+        is_worker = self.is_worker_selected.get()
+
+        if is_worker:
+            logging.info("选择类型：画师（多选模式）")
+            # 画师选中时，右边可以多选，至少保证有一个被选中，默认选中插画
+            if not (self.is_artwork_selected.get() or
+                    self.is_collection_selected.get() or
+                    self.is_novel_selected.get()):
+                self.is_artwork_selected.set(True)
+        else:
+            logging.info("取消画师（单选模式）")
+            # 取消画师时，右边变为单选模式
+            # 保留当前选中的第一个，其他取消
+            selected_count = sum([
+                self.is_artwork_selected.get(),
+                self.is_collection_selected.get(),
+                self.is_novel_selected.get()
+            ])
+
+            if selected_count > 1:
+                # 如果多个被选中，只保留第一个，默认选中插画
+                if self.is_artwork_selected.get():
+                    self.is_collection_selected.set(False)
+                    self.is_novel_selected.set(False)
+                elif self.is_collection_selected.get():
+                    self.is_novel_selected.set(False)
+            elif selected_count == 0:
+                self.is_artwork_selected.set(True)
+
+    # 右边选项切换事件
+    def on_right_option_toggle(self, clicked_option=None):
+        is_worker = self.is_worker_selected.get()
+
+        if is_worker:
+            # 多选模式：至少保证有一个被选中
+            selected_count = sum([
+                self.is_artwork_selected.get(),
+                self.is_collection_selected.get(),
+                self.is_novel_selected.get()
+            ])
+
+            if selected_count == 0:
+                # 如果都被取消了，重新选中插画
+                self.is_artwork_selected.set(True)
+                logging.warning("至少需要选择一个下载类型")
+            else:
+                # 记录当前选中的类型
+                selected = []
+                if self.is_artwork_selected.get():
+                    selected.append("插画")
+                if self.is_collection_selected.get():
+                    selected.append("珍藏册")
+                if self.is_novel_selected.get():
+                    selected.append("小说")
+                logging.info(f"选择类型：画师 + {' + '.join(selected)}")
+        else:
+            # 单选模式：只能选一个
+            # 根据点击的选项来设置
+            if clicked_option == 'artwork':
+                self.is_artwork_selected.set(True)
+                self.is_collection_selected.set(False)
+                self.is_novel_selected.set(False)
+                logging.info("选择类型：插画")
+            elif clicked_option == 'collection':
+                self.is_artwork_selected.set(False)
+                self.is_collection_selected.set(True)
+                self.is_novel_selected.set(False)
+                logging.info("选择类型：珍藏册")
+            elif clicked_option == 'novel':
+                self.is_artwork_selected.set(False)
+                self.is_collection_selected.set(False)
+                self.is_novel_selected.set(True)
+                logging.info("选择类型：小说")
+
     # 更新输入框
     def update_content(self, *_):
         input_text = self.input_var_UID.get()
         logging.debug(f"update_content, 输入的id为：{input_text}")
+
+        # 根据URL自动设置选项
         if TYPE_WORKER in input_text:
-            self.type.set(0)
+            self.is_worker_selected.set(True)
+            self.is_artwork_selected.set(False)
+            self.is_collection_selected.set(False)
+            self.is_novel_selected.set(False)
+            # 画师模式下默认选中插画
+            self.is_artwork_selected.set(True)
+            self.on_worker_toggle()
         elif TYPE_ARTWORKS in input_text:
-            self.type.set(1)
+            self.is_worker_selected.set(False)
+            self.is_artwork_selected.set(True)
+            self.is_collection_selected.set(False)
+            self.is_novel_selected.set(False)
+            self.on_right_option_toggle('artwork')
         elif TYPE_COLLECTION in input_text:
-            self.type.set(2)
+            self.is_worker_selected.set(False)
+            self.is_artwork_selected.set(False)
+            self.is_collection_selected.set(True)
+            self.is_novel_selected.set(False)
+            self.on_right_option_toggle('collection')
         elif TYPE_NOVEL in input_text:
-            self.type.set(3)
+            self.is_worker_selected.set(False)
+            self.is_artwork_selected.set(False)
+            self.is_collection_selected.set(False)
+            self.is_novel_selected.set(True)
+            self.on_right_option_toggle('novel')
 
     # 更新进度条
     def update_progress_bar(self, increment, total=0):
@@ -444,7 +619,20 @@ if __name__ == '__main__':
 
     if args.w or args.a:
         target_id = args.w if args.w else args.a
-        app.type.set(0 if args.w else 1)  # 切换类型
+        # 根据参数类型设置选项
+        if args.w:
+            # 画师模式，默认下载插画
+            app.is_worker_selected.set(True)
+            app.is_artwork_selected.set(True)
+            app.is_collection_selected.set(False)
+            app.is_novel_selected.set(False)
+        else:
+            # 作品模式，默认插画
+            app.is_worker_selected.set(False)
+            app.is_artwork_selected.set(True)
+            app.is_collection_selected.set(False)
+            app.is_novel_selected.set(False)
+        
         app.input_var_UID.set(target_id)
         # 更新cookie
         if args.cookie != cookie_json and args.cookie is not None:
