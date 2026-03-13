@@ -17,37 +17,39 @@
       ...
 - workers_IMG
     - 画师id
-        - 存放的图片
+      -资源类型1
+        - 存放的资源
+      -资源类型2
+        - 存放的资源
           ...
+    -install.json(存放下载历史记录)
 - pixivCrawl.json
-
-（可选）js文件需要搭配浏览器插件（篡改猴测试版）使用
 
 # 使用说明
 **在使用此应用之前，请先打开你的梯子软件**
 ## 1. 直接运行exe文件
-点击exe文件，默认是以管理员方式打开。
+点击exe文件。
 
 ## 2. 使用带参数的命令运行
+options:
+ - `-w` ID, `--worker` ID    画师ID (可配合 -a/-c/-n 多选下载类型)
+ - `-a` [ID], `--artwork` [ID]  插画
+ - `-n` [ID], `--novel` [ID]   小说
+ - `-c` [ID], `--collection` [ID]   珍藏册
+ - `-cookie` COOKIE        PHPSESSID cookie值
+ - `--check-login`         仅检查登录状态
 ```
-# example by 画师ID
-pixivCrawl.exe -w "755446" -cookie " " -sn -ef  
+# example by 下载画师的所有资源（插画、珍藏册、小说）
+PixivCLI.exe -w 123456  
 ```
 ```
-# example by 作品ID
-pixivCrawl.exe -a "129270666" -cookie " " -sn -ef  
+# example by 下载珍藏册
+PixivCLI.exe -c 123456 
 ```
-必填项部分：
-- `-w` | `--worker` 画师ID
-- `-a` | `--artwork`  作品ID
-
-**注意-w 和 -a 只能二选一**
-
-可选项部分：
-- `-cookie` | `--cookie` 登录cookie
-- `-sn` | start_now 是否立刻下载
-- `-ef` | exist_finish 下载结束后是否自动退出
-
+```
+# example by 登录
+PixivCLI.exe -cookie "your_phpsessid_here"
+```
 
 ## ~~3. 使用浏览器插件运行(已废除)~~
 
