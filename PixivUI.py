@@ -1,4 +1,3 @@
-import argparse
 import logging
 import os
 import re
@@ -385,7 +384,7 @@ class PixivApp:
             if already_path and self.is_open_dir.get():
                 logging.debug(f"下载完后打开文件夹")
                 os.startfile(already_path)
-            if if_exit_finish or self.is_finish_exit.get():
+            if self.is_finish_exit.get():
                 logging.info("程序即将自动退出~")
                 time.sleep(3)
                 root.destroy()
@@ -586,60 +585,5 @@ class PixivApp:
 if __name__ == '__main__':
     root = Tk()
     app = PixivApp(root)
-
-    log_init()  # 日志初始化
-
-    is_start_now = False
-    if_exit_finish = False
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-w', '-work', help='画师ID')
-    parser.add_argument('-a', '-artwork', help='作品ID')
-    parser.add_argument('-cookie', help='cookie')
-    parser.add_argument('-sn', '-start-now', action='store_true', help='是否立即开始下载')
-    parser.add_argument('-ef', '-exit-finish', action='store_true', help='程序结束时自动退出')
-
-    args = parser.parse_args()
-
-    if args.a and args.w:
-        logging.warning("一个一个来~")
-        exit(1)
-
-    # 命令行参数解析
-    if args.w:
-        logging.debug(f"浏览器获取的画师ID为：{args.w}")
-    elif args.a:
-        logging.debug(f"浏览器获取的作品ID为：{args.a}")
-    elif args.cookie:
-        args.cookie = args.cookie.replace("PHPSESSID=", "")
-        logging.debug(f"浏览器获取的cookie为：{args.cookie}")
-
-    is_start_now = args.sn
-    if_exit_finish = args.ef
-
-    if args.w or args.a:
-        target_id = args.w if args.w else args.a
-        # 根据参数类型设置选项
-        if args.w:
-            # 画师模式，默认下载插画
-            app.is_worker_selected.set(True)
-            app.is_artwork_selected.set(True)
-            app.is_collection_selected.set(False)
-            app.is_novel_selected.set(False)
-        else:
-            # 作品模式，默认插画
-            app.is_worker_selected.set(False)
-            app.is_artwork_selected.set(True)
-            app.is_collection_selected.set(False)
-            app.is_novel_selected.set(False)
-        
-        app.input_var_UID.set(target_id)
-        # 更新cookie
-        if args.cookie != cookie_json and args.cookie is not None:
-            FileHandlerManager.update_json(args.cookie)
-            logging.debug(f"PHPSESSID已更新为：{args.cookie}")
-
-        if is_start_now:
-            app.button_submit.invoke()
-
+    log_init()
     root.mainloop()
