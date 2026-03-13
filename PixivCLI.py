@@ -38,7 +38,7 @@ class ConsoleProgressBar:
 
             if self.current >= self.total:
                 print()  # 完成后换行
-    
+
     def update_progress_bar_color(self, color):
         """兼容 GUI 版本的颜色更新方法（命令行版本忽略）"""
         pass
@@ -94,23 +94,20 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # 下载画师的所有插画
-  python PixivCLI.py -w 123456 -a
+  # 下载画师的所有资源（插画、珍藏册、小说）
+  PixivCLI.exe -w 123456 
   
   # 下载画师的插画和小说
-  python PixivCLI.py -w 123456 -a -n
-  
-  # 下载单个插画作品
-  python PixivCLI.py -a 123456
-  
+  PixivCLI.exe -w 123456 -a -n
+
   # 下载珍藏册
-  python PixivCLI.py -c 123456
-  
-  # 下载小说
-  python PixivCLI.py -n 123456
+  PixivCLI.exe -c 123456
   
   # 使用自定义 Cookie
-  python PixivCLI.py -w 123456 -a -cookie "your_phpsessid_here"
+  PixivCLI.exe -w 123456 -cookie "your_phpsessid_here"
+  
+  # 登录
+  PixivCLI.exe -cookie "your_phpsessid_here"
         """
     )
 
@@ -181,10 +178,10 @@ def main():
             has_selection = True
             logging.info("  - 包含小说")
 
-        # 如果没有指定类型，默认下载插画
+        # 如果没有指定类型，默认下载所有资源
         if not has_selection:
-            selected_types.append(TYPE_ARTWORKS)
-            logging.info("  - 默认下载插画")
+            selected_types.extend([TYPE_ARTWORKS, TYPE_COLLECTION, TYPE_NOVEL])
+            logging.info("  - 默认下载所有资源（插画、珍藏册、小说）")
 
         logging.info(f"画师模式 - 画师ID: {work_id}")
 
