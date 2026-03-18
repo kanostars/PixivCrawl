@@ -167,11 +167,5 @@ class HistoryManager:
         self.logger.info("历史记录已清空")
     
     def get_count(self) -> int:
-        """
-        获取历史记录数量
-        
-        Returns:
-            记录数量
-        """
         with self.lock:
             return len(self.downloaded_artworks) + len(self.downloaded_collections) + len(self.downloaded_novels)

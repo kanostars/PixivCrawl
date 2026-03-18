@@ -1,6 +1,3 @@
-"""
-配置管理和常量定义
-"""
 import os
 
 TYPE_USER = 'users'
@@ -52,11 +49,15 @@ LINK_ENDPOINTS = {
 # 下载配置
 MAX_WORKERS = min(os.cpu_count() or 4, 4)
 CHUNK_SIZE = 1024 * 1024  # 1MB
-RATE_LIMIT = 4  # 每秒请求数
+RATE_LIMIT = 3  # 每秒请求数
 
 # 超时配置
 CONNECT_TIMEOUT = 10  # 连接超时（秒）
 READ_TIMEOUT = 30  # 读取超时（秒）
+
+# 批次处理配置
+BATCH_SIZE = 20  # 每批处理的作品数
+BATCH_INTERVAL = 2  # 批次间隔（秒）
 
 # 重试配置
 MAX_RETRIES = 5

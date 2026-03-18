@@ -30,6 +30,9 @@ from config.settings import (
     # 超时配置
     CONNECT_TIMEOUT,
     READ_TIMEOUT,
+    # 批次处理配置
+    BATCH_SIZE,
+    BATCH_INTERVAL,
     # 重试配置
     MAX_RETRIES,
     BACKOFF_FACTOR,
@@ -80,6 +83,8 @@ __all__ = [
     'RATE_LIMIT',
     'CONNECT_TIMEOUT',
     'READ_TIMEOUT',
+    'BATCH_SIZE',
+    'BATCH_INTERVAL',
     'MAX_RETRIES',
     'BACKOFF_FACTOR',
     'RETRY_STATUS_CODES',

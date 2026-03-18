@@ -34,7 +34,6 @@ class ProgressTracker:
                 'failed': 0,
                 'metadata': metadata or {}
             }
-            self.logger.info(f"初始化任务 {task_id}，总数: {total}")
 
     def update_progress(self, task_id: str, increment: int = 1, failed: bool = False) -> None:
         """
@@ -76,18 +75,30 @@ class ProgressTracker:
 
     def mark_completed(self, task_id: str) -> None:
         """
-        标记任务完成
+        标记任务完成并输出统计信息
         
         Args:
             task_id: 任务 ID
         """
         with self.lock:
             if task_id in self.tasks:
-                self.logger.info(
-                    f"任务 {task_id} 完成: "
-                    f"成功 {self.tasks[task_id]['completed']}, "
-                    f"失败 {self.tasks[task_id]['failed']}"
-                )
+                task_info = self.tasks[task_id]
+                total = task_info['total']
+                completed = task_info['completed']
+                failed = task_info['failed']
+                
+                # 计算未下载的任务数（预期但未完成的）
+                not_downloaded = total - completed - failed
+                
+                self.logger.info("=" * 20)
+                self.logger.info(f"  预期下载: {total} 个文件")
+                self.logger.info(f"  成功下载: {completed} 个文件")
+                self.logger.info(f"  下载失败: {failed} 个文件")
+                
+                if not_downloaded > 0:
+                    self.logger.warning(f"  未下载: {not_downloaded} 个文件 (可能在添加任务时失败)")
+
+                self.logger.info("=" * 20)
 
     def clear_task(self, task_id: str) -> None:
         """

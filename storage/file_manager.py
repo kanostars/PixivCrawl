@@ -6,7 +6,8 @@ import threading
 from functools import wraps
 from typing import Callable, Any
 
-from config.settings import ARTWORK_DIR, COLLECTION_DIR, NOVEL_DIR, WORKER_DIR, USER_ARTWORK_DIR, USER_COLLECTION_DIR, USER_NOVEL_DIR
+from config.settings import ARTWORK_DIR, COLLECTION_DIR, NOVEL_DIR, WORKER_DIR, USER_ARTWORK_DIR, USER_COLLECTION_DIR, \
+    USER_NOVEL_DIR
 from exceptions import FileOperationException
 from utils.helpers import sanitize_filename as clean_filename
 
@@ -87,7 +88,7 @@ class FileManager:
 
     def get_collection_directory(self, collection_id: str) -> str:
         return self._get_content_directory(COLLECTION_DIR, collection_id)
-    
+
     def get_user_directory(self, user_id: str, artist_name: str = None) -> str:
         """获取画师的根目录
         
@@ -102,7 +103,7 @@ class FileManager:
             self.ensure_directory(directory)
             return directory
         return self._get_content_directory(WORKER_DIR, user_id)
-    
+
     def get_user_artwork_directory(self, user_id: str, artwork_id: str = None, artist_name: str = None) -> str:
         """获取画师模式下的插画目录
         
@@ -113,7 +114,7 @@ class FileManager:
         """
         user_dir = self.get_user_directory(user_id, artist_name)
         artwork_base = os.path.join(user_dir, 'artworks')
-        
+
         if artwork_id:
             artwork_dir = os.path.join(artwork_base, str(artwork_id))
             self.ensure_directory(artwork_dir)
@@ -121,43 +122,21 @@ class FileManager:
         else:
             self.ensure_directory(artwork_base)
             return artwork_base
-    
+
     def get_user_collection_directory(self, user_id: str, collection_id: str, artist_name: str = None) -> str:
-        """获取画师模式下的珍藏册目录
-        
-        Args:
-            user_id: 画师ID
-            collection_id: 珍藏册ID
-            artist_name: 画师名称（可选，用于文件夹命名）
-        """
         user_dir = self.get_user_directory(user_id, artist_name)
         collection_base = os.path.join(user_dir, 'collections')
         collection_dir = os.path.join(collection_base, str(collection_id))
         self.ensure_directory(collection_dir)
         return collection_dir
-    
+
     def get_user_novel_directory(self, user_id: str, artist_name: str = None) -> str:
-        """获取画师模式下的小说目录
-        
-        Args:
-            user_id: 画师ID
-            artist_name: 画师名称（可选，用于文件夹命名）
-        """
         user_dir = self.get_user_directory(user_id, artist_name)
         novel_dir = os.path.join(user_dir, 'novels')
         self.ensure_directory(novel_dir)
         return novel_dir
-    
+
     def get_user_novel_path(self, user_id: str, novel_id: str, title: str, author: str, artist_name: str = None) -> str:
-        """获取画师模式下的小说路径
-        
-        Args:
-            user_id: 画师ID
-            novel_id: 小说ID
-            title: 小说标题
-            author: 作者名
-            artist_name: 画师名称（可选，用于文件夹命名）
-        """
         novel_dir = self.get_user_novel_directory(user_id, artist_name)
         safe_title = clean_filename(title)
         safe_author = clean_filename(author)
@@ -170,10 +149,9 @@ class FileManager:
         safe_author = clean_filename(author)
         filename = f"《{safe_title}》- {safe_author}.txt"
         return os.path.join(NOVEL_DIR, filename)
-    
+
     @staticmethod
     def get_novel_directory() -> str:
-        """获取小说目录"""
         return NOVEL_DIR
 
     @staticmethod

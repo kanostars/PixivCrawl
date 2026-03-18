@@ -17,6 +17,7 @@ from config.settings import (
     ensure_directories
 )
 from download.download_manager import DownloadManager
+from download.content_downloader import ContentDownloader
 from storage.file_manager import FileManager
 from storage.history_manager import HistoryManager
 from utils.helpers import extract_id, analysis_id, open_directory
@@ -59,11 +60,9 @@ class PixivApp:
         # 其他管理器
         self.api_client = None
         self.download_manager = None
+        self.content_downloader = None
         self.file_manager = FileManager()
         self.history_manager = HistoryManager()
-
-        # 跟踪当前下载的作品（用于完成后记录历史）
-        self.current_downloading_works = {}  # {artwork_id: total_pages}
 
         self.input_var_UID = StringVar()
         self.input_var_UID.trace("w", self.update_content)
@@ -109,8 +108,16 @@ class PixivApp:
             self.download_manager = DownloadManager(
                 self.api_client,
                 progress_callback=self.update_progress_callback,
-                task_complete_callback=self.on_task_complete
+                task_complete_callback=None  # 将由 content_downloader 处理
             )
+            self.content_downloader = ContentDownloader(
+                self.api_client,
+                self.download_manager,
+                self.file_manager,
+                self.history_manager
+            )
+            # 设置下载管理器的任务完成回调
+            self.download_manager.task_complete_callback = self.content_downloader.on_task_complete
             logging.info("初始化成功")
 
         except Exception as e:
@@ -243,7 +250,7 @@ class PixivApp:
         ).pack(side='left', padx=10)
 
         self.button_submit = Button(
-            choose_frame, text='检  索', font=self.font_large,
+            choose_frame, text='下  载', font=self.font_large,
             relief='groove', bg='lavender', width=15,
             command=lambda: thread_it(self.submit_download)
         )
@@ -343,7 +350,7 @@ class PixivApp:
             self.total_progress = 0
             self.current_download_path = None
             self.current_user_id = None
-            self.current_downloading_works.clear()
+            self.content_downloader.clear_current_works()
 
             # 获取输入
             input_text = self.input_var_UID.get().strip()
@@ -363,16 +370,27 @@ class PixivApp:
                 # 画师模式
                 user_id = extract_id(input_text, TYPE_USER)
                 self.current_user_id = user_id
-                self.download_user_works(user_id, selected_types)
+
+                download_path, total_tasks = self.content_downloader.download_user_works(
+                    user_id,
+                    selected_types,
+                    progress_callback=self._progress_callback,
+                    check_stopped=self._check_stopped,
+                    check_paused=self._check_paused
+                )
+
+                if download_path:
+                    self.current_download_path = download_path
+                    self.total_progress = total_tasks
             else:
                 # 单个作品模式 - 重置历史记录管理器
                 self.history_manager.reset()
-                
+
                 # 显示检索进度
                 self.process_text.config(text='检索作品信息...')
                 self.progress_bar['value'] = 0
                 self.root.update()
-                
+
                 # 单个作品模式
                 total_types = len(selected_types)
                 for i, type_name in enumerate(selected_types):
@@ -380,32 +398,35 @@ class PixivApp:
                     if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
                         logging.info("检索已停止")
                         return
-                    
+
                     # 检查暂停状态
                     while self.is_paused_btn or self.download_manager.is_paused.is_set():
                         time.sleep(0.5)
-                    
+
                     # 更新检索进度
                     progress = (i + 1) / total_types * 100
                     self.process_text.config(text=f'检索 {type_name} 信息...')
                     self.progress_bar['value'] = progress
                     self.root.update()
-                    
+
                     resource_id = extract_id(input_text, type_name)
                     logging.info(f"下载 {type_name}: {resource_id}")
 
                     if type_name == TYPE_ARTWORK:
                         # 设置插画文件夹路径
                         self.current_download_path = self.file_manager.get_artwork_directory(resource_id)
-                        self.download_artwork(resource_id)
+                        self.content_downloader.download_artwork(resource_id)
+                        self.total_progress += 1
                     elif type_name == TYPE_COLLECTION:
                         # 设置珍藏册文件夹路径
                         self.current_download_path = self.file_manager.get_collection_directory(resource_id)
-                        self.download_collection(resource_id)
+                        self.content_downloader.download_collection(resource_id)
+                        self.total_progress += 1
                     elif type_name == TYPE_NOVEL:
                         # 小说没有文件夹，设置为小说目录
                         self.current_download_path = self.file_manager.get_novel_directory()
-                        self.download_novel(resource_id)
+                        self.content_downloader.download_novel(resource_id)
+                        self.total_progress += 1
 
                 # 检索完成，准备下载
                 self.process_text.config(text='准备下载...')
@@ -427,360 +448,20 @@ class PixivApp:
             self.btn_stop.config(state='disabled')
             self.btn_pause.config(state='disabled')
 
-    def download_user_works(self, user_id: str, work_types: list[str]) -> None:
-        """下载用户作品"""
-        try:
-            logging.info(f"开始检索用户id： {user_id} 的作品...")
-            
-            # 显示检索进度
-            self.process_text.config(text='检索中...')
-            self.progress_bar['value'] = 0
-            self.root.update()
-            
-            # 检查是否被停止
-            if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                logging.info("检索已停止")
-                return
-            
-            # 获取用户所有作品
-            user_works = self.api_client.get_user_works(user_id)
+    def _progress_callback(self, text: str, percentage: float) -> None:
+        """进度回调 - 更新UI"""
+        self.process_text.config(text=text)
+        self.progress_bar['value'] = percentage
+        self.root.update()
 
-            # 尝试获取画师名称（从第一个作品中提取）
-            artist_name = None
-            logging.info("正在获取画师信息...")
-            self.process_text.config(text='获取画师信息...')
-            self.root.update()
-            
-            # 检查是否被停止
-            if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                logging.info("检索已停止")
-                return
-            
-            for work_type in ['illusts', 'manga', 'novels']:
-                works = user_works.get(work_type, {})
-                # 处理可能是列表或字典的情况
-                work_ids = list(works.keys()) if isinstance(works, dict) else (works if isinstance(works, list) else [])
-                if work_ids:
-                    first_work_id = work_ids[0]
-                    if first_work_id:
-                        try:
-                            if work_type in ['illusts', 'manga']:
-                                work_info = self.api_client.get_artwork_info(first_work_id)
-                                artist_name = work_info.get('userName')
-                            elif work_type == 'novels':
-                                novel_info = self.api_client.get_novel_content(first_work_id)
-                                artist_name = novel_info.get('userName')
-                            if artist_name:
-                                self.history_manager.artist_name = artist_name
-                                logging.info(f"画师名称: {artist_name}")
-                                break
-                        except Exception as e:
-                            logging.warning(f"获取画师名称失败: {e}")
+    def _check_stopped(self) -> bool:
+        return self.is_stopped_btn or self.download_manager.is_stopped.is_set()
 
-            # 设置画师文件夹路径（使用"名字(id)"格式）
-            self.current_download_path = self.file_manager.get_user_directory(user_id, artist_name)
-
-            # 设置画师专属的历史记录文件
-            history_file = os.path.join(self.current_download_path, 'download_history.json')
-            self.history_manager.set_history_file(history_file, artist_id=user_id)
-
-            # 显示统计进度
-            logging.info("正在统计作品数量...")
-            self.process_text.config(text='统计作品数量...')
-            self.root.update()
-
-            # 根据类型筛选
-            for work_type in work_types:
-                # 检查是否被停止
-                if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                    logging.info("检索已停止")
-                    return
-                
-                if work_type == TYPE_ARTWORK:
-                    # 下载插画
-                    illusts = user_works.get('illusts', {})
-                    manga = user_works.get('manga', {})
-
-                    # 处理可能是列表或字典的情况
-                    illust_ids = list(illusts.keys()) if isinstance(illusts, dict) else (
-                        illusts if isinstance(illusts, list) else [])
-                    manga_ids = list(manga.keys()) if isinstance(manga, dict) else (
-                        manga if isinstance(manga, list) else [])
-                    all_artwork_ids = illust_ids + manga_ids
-
-                    logging.info(f"找到 {len(all_artwork_ids)} 个插画作品")
-
-                    # 先统计总任务数
-                    artwork_count = 0
-                    for i, artwork_id in enumerate(all_artwork_ids):
-                        # 检查是否被停止
-                        if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                            logging.info("统计已停止")
-                            return
-                        
-                        # 检查暂停状态
-                        while self.is_paused_btn or self.download_manager.is_paused.is_set():
-                            time.sleep(0.5)
-                        
-                        if not self.history_manager.is_downloaded(artwork_id, TYPE_ARTWORK):
-                            try:
-                                # 更新统计进度
-                                progress = (i + 1) / len(all_artwork_ids) * 100
-                                self.process_text.config(text=f'统计插画 {i+1}/{len(all_artwork_ids)}')
-                                self.progress_bar['value'] = progress
-                                self.root.update()
-                                
-                                ugoira_meta = self.api_client.get_ugoira_meta(artwork_id)
-                                if ugoira_meta is not None:
-                                    self.total_progress += 1  # 动图只有 1 个 ZIP 任务
-                                else:
-                                    pages = self.api_client.get_artwork_pages(artwork_id)
-                                    self.total_progress += len(pages)
-                                artwork_count += 1
-                            except Exception as e:
-                                logging.error(f"获取插画 {artwork_id} 信息失败: {e}")
-
-                    logging.info(f"需要下载 {artwork_count} 个插画作品，共 {self.total_progress} 个文件")
-                    logging.info("初始化下载任务中，请稍后...")
-
-                    # 显示检索完成，准备下载
-                    self.progress_bar['value'] = 100
-                    self.process_text.config(text='准备下载...')
-                    self.root.update()
-
-                    # 然后添加下载任务
-                    for artwork_id in all_artwork_ids:
-                        # 检查是否被停止
-                        if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                            logging.info("添加任务已停止")
-                            return
-                        
-                        if not self.history_manager.is_downloaded(artwork_id, TYPE_ARTWORK):
-                            self.download_artwork(artwork_id, user_id=user_id, artist_name=artist_name)
-                        else:
-                            logging.debug(f"插画 {artwork_id} 已下载，跳过")
-
-                elif work_type == TYPE_NOVEL:
-                    # 下载小说
-                    novels = user_works.get('novels', {})
-                    # 处理可能是列表或字典的情况
-                    novel_ids = list(novels.keys()) if isinstance(novels, dict) else (
-                        novels if isinstance(novels, list) else [])
-
-                    logging.info(f"找到 {len(novel_ids)} 个小说作品")
-                    
-                    # 统计小说进度
-                    for i, novel_id in enumerate(novel_ids):
-                        # 检查是否被停止
-                        if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                            logging.info("统计已停止")
-                            return
-                        
-                        # 检查暂停状态
-                        while self.is_paused_btn or self.download_manager.is_paused.is_set():
-                            time.sleep(0.5)
-                        
-                        if not self.history_manager.is_downloaded(novel_id, TYPE_NOVEL):
-                            # 更新统计进度
-                            progress = (i + 1) / len(novel_ids) * 100
-                            self.process_text.config(text=f'统计小说 {i+1}/{len(novel_ids)}')
-                            self.progress_bar['value'] = progress
-                            self.root.update()
-                            
-                            self.download_novel(novel_id, user_id=user_id, artist_name=artist_name)
-                        else:
-                            logging.debug(f"小说 {novel_id} 已下载，跳过")
-                            
-                elif work_type == TYPE_COLLECTION:
-                    # 下载珍藏册
-                    collections = user_works.get('collections', {})
-                    # 处理可能是列表或字典的情况
-                    collection_ids = list(collections.keys()) if isinstance(collections, dict) else (
-                        collections if isinstance(collections, list) else [])
-
-                    logging.info(f"找到 {len(collection_ids)} 个珍藏册")
-                    
-                    # 统计珍藏册进度
-                    for i, collection_id in enumerate(collection_ids):
-                        # 检查是否被停止
-                        if self.is_stopped_btn or self.download_manager.is_stopped.is_set():
-                            logging.info("统计已停止")
-                            return
-                        
-                        # 检查暂停状态
-                        while self.is_paused_btn or self.download_manager.is_paused.is_set():
-                            time.sleep(0.5)
-                        
-                        if not self.history_manager.is_downloaded(collection_id, TYPE_COLLECTION):
-                            # 更新统计进度
-                            progress = (i + 1) / len(collection_ids) * 100
-                            self.process_text.config(text=f'统计珍藏册 {i+1}/{len(collection_ids)}')
-                            self.progress_bar['value'] = progress
-                            self.root.update()
-                            
-                            self.download_collection(collection_id, user_id=user_id, artist_name=artist_name)
-                        else:
-                            logging.debug(f"珍藏册 {collection_id} 已下载，跳过")
-
-            # 检索完成，准备开始下载
-            logging.info("检索完成，准备开始下载...")
-            self.process_text.config(text='准备下载...')
-            self.progress_bar['value'] = 100
-            self.root.update()
-
-        except Exception as e:
-            logging.error(f"下载用户作品失败: {e}")
-
-    def download_artwork(self, artwork_id: str, user_id: str = None, collection_id: str = None,
-                         artist_name: str = None) -> None:
-        """下载插画（含动图）"""
-        try:
-            # 获取插画信息（用于获取画师名称）
-            artwork_info = self.api_client.get_artwork_info(artwork_id)
-            current_artist_name = artwork_info.get('userName', 'unknown')
-            safe_artist_name = self.file_manager.sanitize_filename(current_artist_name)
-
-            # 获取保存目录
-            if user_id and collection_id:
-                save_dir = self.file_manager.get_user_collection_directory(user_id, collection_id, artist_name)
-            elif user_id:
-                save_dir = self.file_manager.get_user_artwork_directory(user_id, artist_name=artist_name)
-            elif collection_id:
-                save_dir = self.file_manager.get_collection_directory(collection_id)
-            else:
-                save_dir = self.file_manager.get_artwork_directory(artwork_id)
-
-            # 先检查是否为动图
-            ugoira_meta = self.api_client.get_ugoira_meta(artwork_id)
-
-            if ugoira_meta is not None:
-                # 动图处理
-                delays = [frame['delay'] for frame in ugoira_meta['frames']]
-                zip_url = ugoira_meta['originalSrc']
-
-                if collection_id and not user_id:
-                    zip_name = f"{artwork_id}.zip"
-                else:
-                    zip_name = f"@{safe_artist_name} {artwork_id}.zip"
-
-                zip_path = os.path.join(save_dir, zip_name)
-
-                # 只在非画师模式下增加总进度
-                if not user_id:
-                    self.total_progress += 1
-
-                if user_id:
-                    self.current_downloading_works[artwork_id] = 1
-
-                self.download_manager.add_task(
-                    url=zip_url,
-                    save_path=zip_path,
-                    metadata={
-                        'artwork_id': artwork_id,
-                        'user_id': user_id,
-                        'is_ugoira': True,
-                        'delays': delays,
-                        'zip_path': zip_path,
-                        'gif_path': zip_path.replace('.zip', '.gif'),
-                    }
-                )
-                logging.debug(f"动图 {artwork_id} 已添加到下载队列")
-
-            else:
-                # 静态图处理
-                pages = self.api_client.get_artwork_pages(artwork_id)
-
-                if not user_id:
-                    self.total_progress += len(pages)
-
-                if user_id:
-                    self.current_downloading_works[artwork_id] = len(pages)
-
-                for idx, page in enumerate(pages):
-                    url = page['urls']['original']
-                    original_filename = os.path.basename(url)
-                    _, ext = os.path.splitext(original_filename)
-                    new_filename = f"@{safe_artist_name} {artwork_id}_{idx}{ext}"
-                    save_path = os.path.join(save_dir, new_filename)
-
-                    self.download_manager.add_task(
-                        url=url,
-                        save_path=save_path,
-                        metadata={'artwork_id': artwork_id, 'page': idx, 'user_id': user_id}
-                    )
-
-                logging.debug(f"插画 {artwork_id} 已添加到下载队列 ({len(pages)} 张)")
-
-        except Exception as e:
-            logging.error(f"下载插画 {artwork_id} 失败: {e}")
-
-    def download_collection(self, collection_id: str, user_id: str = None, artist_name: str = None) -> None:
-        """下载珍藏册
-
-        """
-        try:
-            # 获取珍藏册作品
-            artworks = self.api_client.get_collection_artworks(collection_id)
-
-            logging.info(f"珍藏册 {collection_id} 包含 {len(artworks)} 个作品")
-
-            # 下载每个作品
-            for artwork in artworks:
-                artwork_id = str(artwork['id'])
-                # 画师模式下才检查历史记录
-                if user_id and self.history_manager.is_downloaded(artwork_id):
-                    logging.debug(f"作品 {artwork_id} 已下载，跳过")
-                else:
-                    # 传递 collection_id 和 artist_name 以便保存到珍藏册文件夹
-                    self.download_artwork(artwork_id, user_id=user_id, collection_id=collection_id,
-                                          artist_name=artist_name)
-
-            # 画师模式下，珍藏册本身也记录到历史
-            if user_id:
-                self.history_manager.add(collection_id, TYPE_COLLECTION)
-                logging.info(f"珍藏册 {collection_id} 已记录到历史")
-
-        except Exception as e:
-            logging.error(f"下载珍藏册 {collection_id} 失败: {e}")
-
-    def download_novel(self, novel_id: str, user_id: str = None, artist_name: str = None) -> None:
-        """下载小说
-
-        """
-        try:
-            self.total_progress += 1
-
-            novel_data = self.api_client.get_novel_content(novel_id)
-
-            title = novel_data.get('title', f'novel_{novel_id}')
-            author = novel_data.get('userName', '未知')
-            content = novel_data.get('content', '')
-
-            if user_id:
-                # 画师模式：保存到画师文件夹下
-                save_path = self.file_manager.get_user_novel_path(user_id, novel_id, title, author, artist_name)
-            else:
-                # 单个作品模式：保存到小说目录
-                save_path = self.file_manager.get_novel_path(title, author)
-
-            with open(save_path, 'w', encoding='utf-8') as f:
-                f.write(f"标题: {title}\n")
-                f.write(f"作者: {author}\n")
-                f.write("=" * 50 + "\n\n")
-                f.write(content)
-
-            logging.info(f"小说 {novel_id} 下载完成: {title}")
-
-            if user_id:
-                self.history_manager.add(novel_id, TYPE_NOVEL)
-
-        except Exception as e:
-            logging.error(f"下载小说 {novel_id} 失败: {e}")
+    def _check_paused(self) -> None:
+        while self.is_paused_btn or self.download_manager.is_paused.is_set():
+            time.sleep(0.5)
 
     def start_download(self, is_worker_mode: bool = False) -> None:
-        """开始下载
-
-        """
         try:
             # 检查是否有下载任务
             has_image_tasks = len(self.download_manager.download_queue) > 0
@@ -790,13 +471,20 @@ class PixivApp:
                 logging.warning("没有需要下载的内容")
                 return
 
-            # 重置进度
+            # 重置进度，使用下载队列的实际任务数作为总数
             self.current_progress = 0
+            if has_image_tasks:
+                # 下载阶段：总数 = 下载队列里的实际任务数
+                self.total_progress = len(self.download_manager.download_queue)
             self.update_progress_ui()
 
-            # 启动下载管理器（如果有图片任务）
             if has_image_tasks:
-                self.download_manager.start(task_id="main_download")
+                expected_total = None
+                if is_worker_mode:
+                    stats = self.content_downloader.get_download_stats()
+                    expected_total = stats['expected_tasks']
+                
+                self.download_manager.start(task_id="main_download", expected_total=expected_total)
 
             # 只在画师模式下保存历史记录
             if is_worker_mode:
@@ -816,55 +504,16 @@ class PixivApp:
             logging.error(f"下载过程出错: {e}")
 
     def update_progress_callback(self, increment: int) -> None:
-        """进度更新回调"""
         self.current_progress += increment
         self.root.after(0, self.update_progress_ui)
 
-    def on_task_complete(self, metadata: dict) -> None:
-        """
-        单个下载任务完成回调
-        用于跟踪作品的完整下载状态，并触发动图合成
-        
-        Args:
-            metadata: 任务元数据，包含 artwork_id, user_id 等信息
-        """
-        if not metadata:
-            return
-
-        artwork_id = metadata.get('artwork_id')
-        user_id = metadata.get('user_id')
-
-        # 动图合成
-        if metadata.get('is_ugoira'):
-            from utils.helpers import compose_ugoira
-            zip_path = metadata.get('zip_path')
-            gif_path = metadata.get('gif_path')
-            delays = metadata.get('delays', [])
-            compose_ugoira(zip_path, gif_path, delays)
-
-        # 只在画师模式下处理历史记录
-        if not user_id or not artwork_id:
-            return
-
-        if artwork_id not in self.current_downloading_works:
-            return
-
-        self.current_downloading_works[artwork_id] -= 1
-
-        if self.current_downloading_works[artwork_id] <= 0:
-            self.history_manager.add(artwork_id, TYPE_ARTWORK)
-            logging.debug(f"插画 {artwork_id} 完整下载完成，已记录到历史")
-            del self.current_downloading_works[artwork_id]
-
     def update_progress_ui(self) -> None:
-        """更新进度条UI"""
         if self.total_progress > 0:
             percentage = (self.current_progress / self.total_progress) * 100
             self.progress_bar['value'] = percentage
-            self.process_text.config(text=f'{int(percentage)}%')
+            self.process_text.config(text=f'{percentage:.2f}%')
 
     def toggle_pause(self) -> None:
-        """暂停/恢复下载"""
         if not self.is_paused_btn:
             self.download_manager.pause()
             self.btn_pause.config(text=' ▶ ')
@@ -918,7 +567,6 @@ class PixivApp:
                 self.is_artwork_selected.set(True)
 
     def on_right_option_toggle(self, option_type: str) -> None:
-        """右侧选项切换 - 根据画师模式决定单选或多选"""
         is_worker = self.is_worker_selected.get()
 
         if is_worker:
@@ -994,7 +642,6 @@ class PixivApp:
             self.on_right_option_toggle(TYPE_NOVEL)
 
     def open_pixiv(self) -> None:
-        """打开 Pixiv 网站"""
         try:
             pixiv_url = "https://www.pixiv.net/"
             logging.info(f"正在打开 Pixiv 网站: {pixiv_url}")
@@ -1003,7 +650,6 @@ class PixivApp:
             logging.error(f"打开 Pixiv 网站失败: {e}")
 
     def open_github(self) -> None:
-        """打开 GitHub 仓库"""
         try:
             github_url = "https://github.com/kanostars/PixivCrawl"
             logging.info(f"正在打开 GitHub 仓库: {github_url}")
@@ -1012,7 +658,6 @@ class PixivApp:
             logging.error(f"打开 GitHub 失败: {e}")
 
     def open_space(self) -> None:
-        """跳转到Pixiv空间"""
         try:
             input_text = self.input_var_UID.get().strip()
             if not input_text:
